@@ -5,6 +5,20 @@ asignarles una nueva version. La version mostrada por la app sigue siendo 1.0.
 
 ## Sin publicar
 
+### Subidas por bloques y procesamiento
+
+- Transporte HTTP creado con la configuracion oficial de Google: un `308 Resume
+  Incomplete` sin cabecera Location continua la subida en lugar de tratarse como
+  redireccion. Se conserva el tiempo de espera de 30 segundos.
+- Los videos en procesamiento se conservan aunque el intento local figure como
+  error o cancelacion; esos estados locales ya no provocan su borrado automatico.
+- Las cancelaciones no eliminan videos remotos por una inferencia de estado incompleto.
+- El registro distingue procesamiento de subida confirmada; solo los confirmados
+  pasan a Subido y pueden entrar en limpieza local.
+- Actualizacion agrupada de la biblioteca ante eventos del trabajador.
+- Prueba con respuestas HTTP 308 sin Location y finalizacion 201, sin conexiones
+  reales, y pruebas de conservacion de videos en procesamiento y cancelacion.
+
 ### Unico proyecto activo
 
 - El desarrollo y la compilacion se centran exclusivamente en la interfaz Qt.

@@ -47,7 +47,7 @@ class OAuthTests(unittest.TestCase):
         with patch.object(engine.InstalledAppFlow, "from_client_secrets_file", return_value=flow), \
                 patch.object(engine.Credentials, "from_authorized_user_file", return_value=self.creds), \
                 patch.object(engine, "build"), patch.object(engine, "AuthorizedHttp"), \
-                patch.object(engine.httplib2, "Http"):
+                patch.object(engine, "build_http"):
             with ThreadPoolExecutor(max_workers=3) as pool:
                 first = pool.submit(self.client().service)
                 self.assertTrue(started.wait(2))
@@ -86,7 +86,7 @@ class OAuthTests(unittest.TestCase):
         with patch.object(engine.Credentials, "from_authorized_user_file", return_value=expired), \
                 patch.object(engine.InstalledAppFlow, "from_client_secrets_file", return_value=flow), \
                 patch.object(engine, "build"), patch.object(engine, "AuthorizedHttp"), \
-                patch.object(engine.httplib2, "Http"):
+                patch.object(engine, "build_http"):
             self.client().service()
         flow.run_local_server.assert_called_once()
         self.assertEqual(self.token.read_text(), self.creds.to_json())

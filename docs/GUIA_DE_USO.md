@@ -50,6 +50,9 @@ el JSON ni el token de acceso en GitHub.
 
 Los botones muestran su funcion al situar el raton encima. La cancelacion
 puede tardar hasta que termine la operacion de transferencia en curso.
+Una cancelacion no borra automaticamente un video remoto. Antes de reintentar,
+la app comprueba el canal; si YouTube sigue procesando el video, lo conserva.
+Los videos dudosos pueden revisarse y eliminarse manualmente desde Canal.
 
 ## Pestana Videos
 

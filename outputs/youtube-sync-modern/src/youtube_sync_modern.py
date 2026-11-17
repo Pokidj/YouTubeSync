@@ -604,6 +604,9 @@ class MainWindow(QMainWindow):
         self.layout_timer = QTimer(self)
         self.layout_timer.setSingleShot(True)
         self.layout_timer.timeout.connect(self.adjust_channel_layout)
+        self.folder_refresh_timer = QTimer(self)
+        self.folder_refresh_timer.setSingleShot(True)
+        self.folder_refresh_timer.timeout.connect(self.refresh_folder)
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(QIcon(str(asset_path("youtube-sync.ico"))))
@@ -1184,8 +1187,10 @@ class MainWindow(QMainWindow):
                 continue
             registry_row = registry_by_signature.get(signature) or registry_by_path.get(str(path))
             status_row = statuses_by_signature.get(signature) or statuses_by_path.get(str(path))
-            if registry_row and registry_row[3]:
+            if registry_row and registry_row[3] and registry_row[4] in {"uploaded", "youtube_title_exists"}:
                 status = "Subido"
+            elif registry_row and registry_row[3] and registry_row[4] == "processing":
+                status = "En curso"
             elif status_row and status_row[3] in {"error", "cancelled"}:
                 status = "Incidencia"
             elif status_row and status_row[3] in {"uploading", "processing"}:
@@ -1786,7 +1791,9 @@ class MainWindow(QMainWindow):
             elif kind == "busy":
                 self.status.setText("Trabajando..." if value else "Preparado")
             elif kind == "upload_completed":
-                self.refresh_folder()
+                self.folder_refresh_timer.start(0)
+            elif kind == "folder_refresh":
+                self.folder_refresh_timer.start(150)
             elif kind == "upload_limited":
                 self.auto_enabled = False
                 self.update_auto_button()

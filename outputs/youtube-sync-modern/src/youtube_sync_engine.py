@@ -64,7 +64,7 @@ try:
     from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
     from googleapiclient.errors import HttpError
-    from googleapiclient.http import MediaFileUpload
+    from googleapiclient.http import MediaFileUpload, build_http
 except Exception:
     Request = None
     Credentials = None
@@ -72,6 +72,7 @@ except Exception:
     build = None
     HttpError = Exception
     MediaFileUpload = None
+    build_http = None
     RefreshError = None
     AuthorizedHttp = None
     httplib2 = None
@@ -512,7 +513,8 @@ class Store:
     def has_success(self, signature: str) -> bool:
         with self._connection() as db:
             row = db.execute(
-                "SELECT 1 FROM upload_registry WHERE signature = ?",
+                "SELECT 1 FROM upload_registry WHERE signature = ? AND youtube_id != '' "
+                "AND reason IN ('uploaded', 'youtube_title_exists')",
                 (signature,),
             ).fetchone()
             return row is not None
@@ -754,7 +756,10 @@ class YouTubeClient:
                 raise
             _oauth_retry_after.pop(retry_key, None)
 
-        transport = AuthorizedHttp(creds, http=httplib2.Http(timeout=30))
+        # Google's factory leaves resumable-upload HTTP 308 responses to next_chunk().
+        http = build_http()
+        http.timeout = 30
+        transport = AuthorizedHttp(creds, http=http)
         self._service = build("youtube", "v3", http=transport, cache_discovery=False)
         return self._service
 
@@ -941,25 +946,6 @@ class YouTubeClient:
         if not video_id:
             raise ValueError("No hay ID de YouTube para eliminar el video.")
         self.service().videos().delete(id=video_id).execute()
-
-    def remove_incomplete_upload(self, path: Path, title: str) -> tuple[bool, str]:
-        self.uploaded_video_index(force=True)
-        matches, video_id, _reason, state = self.verify_local_file(path, title)
-        if not matches or not video_id or state not in {"uploaded", "processing"}:
-            return False, ""
-        try:
-            self.delete_video(video_id)
-        except HttpError as exc:
-            if getattr(exc.resp, "status", 0) != 404:
-                raise
-        self._known_titles = None
-        self._known_video_ids = None
-        self._known_title_ids = None
-        self._known_all_title_ids = None
-        self._known_title_candidates = None
-        self._known_video_states = None
-        self._known_video_metadata = None
-        return True, video_id
 
     def uploaded_titles(self, force: bool = False) -> set[str]:
         titles, _video_ids = self.uploaded_video_index(force=force)
@@ -1429,10 +1415,9 @@ class SyncWorker(threading.Thread):
         if self.store.has_success(signature):
             self.log(f"Omitido {path.name}: ya esta en el registro permanente.")
             return
-        previous_status = self.store.upload_status(signature)
         content_matches, youtube_id, match_reason, remote_state = client.verify_local_file(path, title)
         if remote_state == "processed" and content_matches:
-            self.store.upsert(signature, path, title, "skipped", youtube_id=youtube_id, error="Ya existe en YouTube un video con ese titulo.")
+            self.store.upsert(signature, path, title, "uploaded", youtube_id=youtube_id)
             self.store.remember_upload(signature, path, title, youtube_id=youtube_id, reason="youtube_title_exists")
             self.log(f"Omitido {path.name}: contenido confirmado en YouTube ({match_reason}).")
             self.events.put(("folder_refresh", False))
@@ -1440,23 +1425,11 @@ class SyncWorker(threading.Thread):
         if remote_state == "processed" and not content_matches:
             self.log(f"El titulo {title} existe, pero no corresponde a {path.name}: {match_reason}. Se subira el archivo correcto.")
         if remote_state in {"uploaded", "processing"} and content_matches:
-            if previous_status in {"cancelled", "error", "uploading"}:
-                try:
-                    client.delete_video(youtube_id)
-                    self.log(f"Eliminado de YouTube el intento incompleto {youtube_id} antes de reintentar.")
-                    youtube_id, remote_state = "", "missing"
-                except Exception as exc:
-                    message = f"No se pudo retirar la subida incompleta de YouTube: {describe_error(exc)}"
-                    self.store.upsert(signature, path, title, "error", youtube_id=youtube_id, error=message)
-                    self.log(message)
-                    self.events.put(("folder_refresh", False))
-                    return
-            else:
-                self.store.upsert(signature, path, title, "processing", youtube_id=youtube_id)
-                self.store.remember_upload(signature, path, title, youtube_id=youtube_id, reason="processing")
-                self.log(f"Recuperada una subida que YouTube todavia esta procesando: https://youtu.be/{youtube_id}")
-                self.events.put(("folder_refresh", False))
-                return
+            self.store.upsert(signature, path, title, "processing", youtube_id=youtube_id)
+            self.store.remember_upload(signature, path, title, youtube_id=youtube_id, reason="processing")
+            self.log(f"YouTube aun esta procesando https://youtu.be/{youtube_id}; se conserva y se comprobara de nuevo. Puedes revisarlo en Canal.")
+            self.events.put(("folder_refresh", False))
+            return
         if remote_state in {"failed", "rejected", "terminated"} and youtube_id and content_matches:
             try:
                 client.delete_video(youtube_id)
@@ -1485,13 +1458,7 @@ class SyncWorker(threading.Thread):
             }))
             return
         except UploadCancelled as exc:
-            message = str(exc)
-            try:
-                removed, incomplete_id = client.remove_incomplete_upload(path, title)
-                if removed:
-                    message += f" Se elimino de YouTube el intento incompleto {incomplete_id}."
-            except Exception as cleanup_error:
-                message += f" La limpieza remota queda pendiente: {describe_error(cleanup_error)}"
+            message = str(exc) + " Se comprobara el canal antes de reintentar; no se borra ningun video automaticamente por esta cancelacion."
             self.store.upsert(signature, path, title, "cancelled", error=message)
             self.log(message)
             self.events.put(("folder_refresh", False))
