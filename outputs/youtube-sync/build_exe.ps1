@@ -39,6 +39,7 @@ if (-not (Test-Path ".venv")) {
     --noconfirm `
     --clean `
     --windowed `
+    --additional-hooks-dir ".\build_hooks" `
     --name "YouTubeSync" `
     --icon ".\assets\youtube-sync.ico" `
     --add-data ".\assets\youtube-sync-logo.png;assets" `

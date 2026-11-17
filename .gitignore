@@ -14,6 +14,7 @@
 /outputs/youtube-sync/*
 /outputs/youtube-sync-modern/*
 !/outputs/youtube-sync/src/
+!/outputs/youtube-sync/build_hooks/
 !/outputs/youtube-sync/assets/
 !/outputs/youtube-sync/README.md
 !/outputs/youtube-sync/requirements.txt

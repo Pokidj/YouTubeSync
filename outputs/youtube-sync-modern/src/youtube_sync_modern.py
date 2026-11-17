@@ -615,6 +615,7 @@ class MainWindow(QMainWindow):
         self.settings_dialog = None
         self.auto_enabled = bool(self.config.auto_start_enabled)
         self.channel_loader = None
+        self.youtube_check_running = False
         self.video_rows: dict[int, dict] = {}
         self.channel_videos: list[dict] = []
         self.channel_rows_by_id: dict[int, dict] = {}
@@ -1363,9 +1364,12 @@ class MainWindow(QMainWindow):
         self.events.put(("local_delete_result", {"deleted": deleted, "errors": errors}))
 
     def check_youtube(self) -> None:
+        if self.youtube_check_running:
+            return
         if not self.config.client_secret_path or not Path(self.config.client_secret_path).exists():
             self.state_card.set("Sin OAuth", "Configura el JSON de YouTube.")
             return
+        self.youtube_check_running = True
         threading.Thread(target=self._check_youtube_thread, daemon=True).start()
 
     def _check_youtube_thread(self) -> None:
@@ -1816,8 +1820,10 @@ class MainWindow(QMainWindow):
                 self.update_auto_button()
                 self.upload_card.set("Limite YouTube", value.get("message", "Reintento mas tarde"))
             elif kind == "youtube":
+                self.youtube_check_running = False
                 self.state_card.set("Conectado", value.get("title", "Canal conectado"))
             elif kind == "youtube_error":
+                self.youtube_check_running = False
                 self.state_card.set("Sin conexion", value)
             elif kind == "channel_shared":
                 value["privacy"] = "unlisted"

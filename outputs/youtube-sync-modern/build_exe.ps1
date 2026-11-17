@@ -19,6 +19,7 @@ $VenvPython = ".\.venv\Scripts\python.exe"
 & $VenvPython -m PyInstaller `
     --noconfirm `
     --windowed `
+    --additional-hooks-dir "..\youtube-sync\build_hooks" `
     --name YouTubeSync `
     --icon ".\assets\youtube-sync.ico" `
     --add-data ".\assets;assets" `

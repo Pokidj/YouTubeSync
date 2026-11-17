@@ -68,11 +68,21 @@ powershell -ExecutionPolicy Bypass -File outputs/youtube-sync-modern/build_exe.p
 
 El script prepara las dependencias y genera:
 
+Los scripts cargan `outputs/youtube-sync/build_hooks/hook-ssl.py`. Este hook
+incluye el archivo de confianza auxiliar si el runtime de Python lo requiere.
+Si se invoca PyInstaller directamente, hay que conservar `--additional-hooks-dir`
+con esa carpeta: una compilacion correcta no garantiza que HTTPS funcione si
+faltan los datos auxiliares del runtime.
+
 ```text
 outputs/youtube-sync-modern/dist/YouTubeSync/
   YouTubeSync.exe
   _internal/
 ```
+
+Las pruebas OAuth utilizan credenciales simuladas y verifican concurrencia,
+conservacion del token ante fallos de red y renovacion tras revocacion. No
+autorizan cuentas reales ni realizan subidas.
 
 Distribuye la carpeta completa en un ZIP. El repositorio guarda fuentes y
 recursos, y excluye las compilaciones generadas. Estas pueden publicarse como

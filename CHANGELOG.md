@@ -5,6 +5,18 @@ asignarles una nueva version. La version mostrada por la app sigue siendo 1.0.
 
 ## Sin publicar
 
+### Conexion OAuth y HTTPS
+
+- Corregido el empaquetado del archivo auxiliar SSL requerido por ciertos
+  runtimes de Python; su ausencia impedia crear conexiones HTTPS en el ejecutable.
+- Autorizacion serializada entre comprobaciones, escaneos y subidas para evitar
+  abrir varios consentimientos de Google a la vez.
+- Los fallos de red al renovar un token ya no descartan la autorizacion existente.
+- Renovacion de consentimiento solo ante permisos cambiados o credenciales revocadas.
+- Escritura atomica del token y pausa breve tras errores de autorizacion.
+- Tiempos de espera limitados para consultas, renovacion y consentimiento OAuth.
+- Comprobacion de conexion sin hilos duplicados y cambios ON/OFF idempotentes.
+
 ### Revision de la interfaz en modo ventana
 
 - Corregida la altura del contenedor de la interfaz anterior para que las

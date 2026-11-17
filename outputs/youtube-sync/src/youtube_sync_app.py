@@ -1,4 +1,5 @@
 import hashlib
+from functools import partial
 import json
 import os
 import queue
@@ -7,6 +8,7 @@ import shutil
 import sqlite3
 import sys
 import threading
+import tempfile
 import time
 import webbrowser
 from dataclasses import asdict, dataclass
@@ -21,6 +23,9 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 try:
     from google.auth.transport.requests import Request
+    from google.auth.exceptions import RefreshError
+    from google_auth_httplib2 import AuthorizedHttp
+    import httplib2
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
@@ -33,6 +38,9 @@ except Exception:
     build = None
     HttpError = Exception
     MediaFileUpload = None
+    RefreshError = None
+    AuthorizedHttp = None
+    httplib2 = None
 
 try:
     from PIL import Image, ImageTk
@@ -821,6 +829,10 @@ class UploadCancelled(Exception):
     pass
 
 
+_oauth_lock = threading.Lock()
+_oauth_retry_after: dict[str, tuple[float, str]] = {}
+
+
 class YouTubeClient:
     def __init__(self, store: Store, config: Config, log: Callable[[str], None], client_secret_path: str = "", label: str = "principal") -> None:
         self.store = store
@@ -839,7 +851,7 @@ class YouTubeClient:
         self._known_video_metadata: dict[str, dict] | None = None
 
     def available(self) -> bool:
-        return all([Request, Credentials, InstalledAppFlow, build, MediaFileUpload])
+        return all([Request, Credentials, InstalledAppFlow, build, MediaFileUpload, AuthorizedHttp, httplib2])
 
     def service(self):
         if not self.available():
@@ -847,6 +859,24 @@ class YouTubeClient:
         if self._service:
             return self._service
 
+        # UI checks, scanning and uploads may request authorization concurrently.
+        with _oauth_lock:
+            retry_key = str(self.token_path.resolve())
+            retry_at, previous_error = _oauth_retry_after.get(retry_key, (0, ""))
+            if time.monotonic() < retry_at:
+                raise RuntimeError(f"OAuth en espera breve tras un error: {previous_error}. Reintenta en 30 segundos.")
+            try:
+                creds = self._authorize()
+            except Exception as exc:
+                _oauth_retry_after[retry_key] = (time.monotonic() + 30, describe_error(exc))
+                raise
+            _oauth_retry_after.pop(retry_key, None)
+
+        transport = AuthorizedHttp(creds, http=httplib2.Http(timeout=30))
+        self._service = build("youtube", "v3", http=transport, cache_discovery=False)
+        return self._service
+
+    def _authorize(self):
         creds = None
         if self.token_path.exists():
             try:
@@ -857,16 +887,16 @@ class YouTubeClient:
         if missing_scopes:
             self.log("Los permisos de YouTube cambiaron. Se pedira autorizacion de nuevo.")
             creds = None
-            try:
-                self.token_path.unlink(missing_ok=True)
-            except OSError:
-                pass
         if not creds or not creds.valid or missing_scopes:
-            if creds and creds.expired and creds.refresh_token and not missing_scopes:
+            if creds and creds.refresh_token and not missing_scopes:
                 try:
-                    creds.refresh(Request())
-                except Exception:
-                    creds = None
+                    creds.refresh(partial(Request(), timeout=30))
+                except RefreshError as exc:
+                    if any(reason in str(exc).lower() for reason in ("invalid_grant", "invalid_scope", "unauthorized_client")):
+                        self.log("Google solicita renovar la autorizacion del canal.")
+                        creds = None
+                    else:
+                        raise
             else:
                 creds = None
             if not creds:
@@ -874,11 +904,25 @@ class YouTubeClient:
                     raise RuntimeError("Selecciona el archivo client_secret.json en Configuracion.")
                 self.log(f"Autorizando credencial OAuth {self.label}.")
                 flow = InstalledAppFlow.from_client_secrets_file(self.client_secret_path, SCOPES)
-                creds = flow.run_local_server(port=0, prompt="consent")
-            self.token_path.write_text(creds.to_json(), encoding="utf-8")
-
-        self._service = build("youtube", "v3", credentials=creds)
-        return self._service
+                flow.fetch_token = partial(flow.fetch_token, timeout=30)
+                creds = flow.run_local_server(
+                    port=0, prompt="consent", timeout_seconds=180,
+                    authorization_prompt_message="",
+                )
+            if not creds or not creds.valid:
+                raise RuntimeError("La autorizacion no termino correctamente. Vuelve a conectar YouTube.")
+            self.token_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.token_path.parent,
+                                                 prefix=self.token_path.stem, suffix=".tmp", delete=False) as output:
+                    temporary = Path(output.name)
+                    output.write(creds.to_json())
+                temporary.replace(self.token_path)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+        return creds
 
     def channel_info(self) -> dict:
         response = self.service().channels().list(part="snippet,contentDetails", mine=True).execute()
@@ -1305,6 +1349,8 @@ class SyncWorker(threading.Thread):
         self.wake_event.set()
 
     def set_enabled(self, enabled: bool) -> None:
+        if self.enabled_event.is_set() == enabled:
+            return
         if enabled:
             self.enabled_event.set()
             self.cancel_upload_event.clear()
@@ -1991,6 +2037,7 @@ class App(tk.Tk):
         self.tray_icon = None
         self.logo_image = None
         self.busy = False
+        self.youtube_check_running = False
         self.folder_refresh_running = False
         self.folder_refresh_pending = False
         self.folder_refresh_verify_pending = False
@@ -3168,13 +3215,11 @@ class App(tk.Tk):
         if self.auto_enabled:
             self.auto_button.configure(text="Auto ON", style="Success.TButton")
             self.set_health("warn", "Modo automatico activo")
-            self.log("Modo automatico activado.")
             self.scan_now()
         else:
             self.auto_button.configure(text="Auto OFF", style="Danger.TButton")
             self.set_card(self.progress_card, "Pausado", "Auto OFF", "#f59e0b", "⏸")
             self.set_health("warn", "Modo automatico pausado")
-            self.log("Modo automatico pausado.")
 
     def refresh_all(self) -> None:
         self.check_youtube_connection()
@@ -3263,11 +3308,14 @@ class App(tk.Tk):
         self.log("Auto se ha pausado para impedir que el video cancelado vuelva a subirse automaticamente.")
 
     def check_youtube_connection(self) -> None:
+        if self.youtube_check_running:
+            return
         if self.upload_limit_state:
             self.set_card(self.youtube_card, "En espera", "Cuota del proyecto", "#f59e0b", "!")
             return
         self.set_card(self.youtube_card, "Comprobando", "YouTube", "#f59e0b", "●")
         self.set_health("warn", "Comprobando conexion con YouTube...")
+        self.youtube_check_running = True
         threading.Thread(target=self._check_youtube_connection_thread, daemon=True).start()
 
     def _check_youtube_connection_thread(self) -> None:
@@ -3421,6 +3469,7 @@ class App(tk.Tk):
                         self.folder_refresh_verify_pending = False
                         self.after_idle(lambda verify=verify: self.refresh_folder_contents(verify_youtube=verify))
                 elif kind == "youtube":
+                    self.youtube_check_running = False
                     category = CATEGORY_NAMES_BY_ID.get(self.config.category_id, self.config.category_id)
                     playlist = self.config.playlist_name if self.config.playlist_id else "Sin lista"
                     self.set_card(self.youtube_card, "Conectado", f"{value['title']} · {playlist}", "#22c55e", "✓")
@@ -3430,6 +3479,7 @@ class App(tk.Tk):
                     else:
                         self.set_health("error", "YouTube OK, pero la carpeta no es valida")
                 elif kind == "youtube_error":
+                    self.youtube_check_running = False
                     self.set_card(self.youtube_card, "Sin conexion", "Revisa OAuth", "#ef4444", "!")
                     self.log(f"No se pudo comprobar YouTube: {value}")
                     self.set_health("error", "YouTube no conectado")
