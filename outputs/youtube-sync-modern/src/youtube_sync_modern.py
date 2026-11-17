@@ -2083,6 +2083,16 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     apply_style(app)
+    if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
+        import json
+        import ssl
+        ssl.create_default_context()
+        preview = QWidget()
+        preview.show()
+        app.processEvents()
+        preview.close()
+        Path(sys.argv[2]).write_text(json.dumps({"ok": True, "ui": "qt", "ssl": True}), encoding="utf-8")
+        return
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

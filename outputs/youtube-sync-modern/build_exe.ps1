@@ -18,15 +18,10 @@ $VenvPython = ".\.venv\Scripts\python.exe"
 
 & $VenvPython -m PyInstaller `
     --noconfirm `
-    --windowed `
-    --additional-hooks-dir "..\youtube-sync\build_hooks" `
-    --name YouTubeSync `
-    --icon ".\assets\youtube-sync.ico" `
-    --add-data ".\assets;assets" `
-    --add-data "..\youtube-sync\src\youtube_sync_app.py;legacy" `
-    --paths "..\youtube-sync\src" `
-    --hidden-import youtube_sync_app `
-    ".\src\youtube_sync_modern.py"
+    --distpath "$Root\dist" `
+    --workpath "$Root\build" `
+    ".\packaging\YouTubeSync.spec"
+if ($LASTEXITCODE -ne 0) { throw "No se pudo compilar YouTubeSync." }
 
 Write-Host ""
 Write-Host "EXE creado en: $Root\dist\YouTubeSync\YouTubeSync.exe"

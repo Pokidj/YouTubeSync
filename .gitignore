@@ -19,11 +19,14 @@
 !/outputs/youtube-sync/README.md
 !/outputs/youtube-sync/requirements.txt
 !/outputs/youtube-sync/build_exe.ps1
+!/outputs/youtube-sync/Abrir-YouTubeSync.cmd
 !/outputs/youtube-sync-modern/src/
+!/outputs/youtube-sync-modern/packaging/
 !/outputs/youtube-sync-modern/assets/
 !/outputs/youtube-sync-modern/README.md
 !/outputs/youtube-sync-modern/requirements.txt
 !/outputs/youtube-sync-modern/build_exe.ps1
+!/outputs/youtube-sync-modern/Abrir-YouTubeSync.cmd
 
 __pycache__/
 *.py[cod]
@@ -31,6 +34,7 @@ __pycache__/
 dist/
 build/
 *.spec
+!/outputs/youtube-sync-modern/packaging/YouTubeSync.spec
 *.json
 *.db*
 *.sqlite*

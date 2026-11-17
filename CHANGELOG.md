@@ -5,6 +5,16 @@ asignarles una nueva version. La version mostrada por la app sigue siendo 1.0.
 
 ## Sin publicar
 
+### Arranque del ejecutable
+
+- Corregida una colision de `icuuc.dll` que impedia importar QtCore: el paquete
+  Qt utiliza ahora la biblioteca ICU de Windows y excluye la copia ajena de PATH.
+- Especificacion de empaquetado Qt versionada para conservar esta correccion.
+- Modo `--self-test` para comprobar el arranque de Qt/Tk y SSL sin abrir la
+  configuracion del usuario, autorizar cuentas ni subir archivos.
+- Lanzadores `Abrir-YouTubeSync.cmd` dirigidos a `dist`, evitando ejecutar los
+  archivos intermedios incompletos de `build`.
+
 ### Conexion OAuth y HTTPS
 
 - Corregido el empaquetado del archivo auxiliar SSL requerido por ciertos

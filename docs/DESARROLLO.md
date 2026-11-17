@@ -88,6 +88,29 @@ Distribuye la carpeta completa en un ZIP. El repositorio guarda fuentes y
 recursos, y excluye las compilaciones generadas. Estas pueden publicarse como
 archivos adjuntos de una release cuando exista una version verificada.
 
+La interfaz Qt se compila con `outputs/youtube-sync-modern/packaging/YouTubeSync.spec`.
+Esta especificacion excluye la `icuuc.dll` que otras herramientas pueden anadir
+a PATH; Qt debe usar la API ICU de Windows. No sustituyas la compilacion por
+un comando generico de PyInstaller que pierda esta exclusion.
+
+Despues de compilar, comprueba el ejecutable real desde su carpeta `dist`:
+
+```powershell
+./outputs/youtube-sync-modern/dist/YouTubeSync/YouTubeSync.exe --self-test ./qt-startup.json
+./outputs/youtube-sync/dist/YouTubeSync/YouTubeSync.exe --self-test ./tk-startup.json
+```
+
+Cada comando genera un informe con `ok: true` al terminar correctamente. Este
+modo no carga la base de datos ni inicia OAuth. Los ejecutables de `build` son
+intermedios y no pueden ejecutarse por separado. Los lanzadores
+`Abrir-YouTubeSync.cmd` de cada proyecto apuntan a la distribucion correcta.
+
+Puedes comprobar ambas distribuciones y sus archivos auxiliares con:
+
+```powershell
+./outputs/youtube-sync-modern/.venv/Scripts/python.exe scripts/check_distribution.py
+```
+
 ## Datos y credenciales
 
 La app utiliza `%APPDATA%\YouTubeSync` para sus datos persistentes.

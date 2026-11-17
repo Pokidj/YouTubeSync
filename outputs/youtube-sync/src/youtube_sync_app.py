@@ -4194,6 +4194,15 @@ class App(tk.Tk):
 
 
 def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
+        import ssl
+        ssl.create_default_context()
+        preview = tk.Tk()
+        preview.withdraw()
+        preview.update_idletasks()
+        preview.destroy()
+        Path(sys.argv[2]).write_text(json.dumps({"ok": True, "ui": "tk", "ssl": True}), encoding="utf-8")
+        return
     app = App()
     app.mainloop()
 
