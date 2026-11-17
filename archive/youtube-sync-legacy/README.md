@@ -1,5 +1,9 @@
 # YouTubeSync
 
+> ARCHIVADA. Esta interfaz anterior se conserva por referencia historica.
+> El desarrollo activo y las compilaciones estan en `outputs/youtube-sync-modern`.
+> Usa `Abrir-YouTubeSync.cmd` en la raiz del repositorio para abrir la app actual.
+
 Aplicacion de escritorio para Windows que vigila una carpeta local de videos y los sube automaticamente a YouTube.
 
 ## Lo que hace

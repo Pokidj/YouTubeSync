@@ -5,6 +5,16 @@ asignarles una nueva version. La version mostrada por la app sigue siendo 1.0.
 
 ## Sin publicar
 
+### Unico proyecto activo
+
+- El desarrollo y la compilacion se centran exclusivamente en la interfaz Qt.
+- Motor extraido a `youtube_sync_engine.py` dentro del proyecto moderno, sin
+  dependencia de la carpeta antigua ni importaciones de Tkinter, Pillow o pystray.
+- Version anterior conservada en `archive/youtube-sync-legacy`; deja de aparecer
+  como una segunda aplicacion en `outputs` y de participar en las pruebas activas.
+- Lanzador y compilacion unicos en la raiz del repositorio.
+- Conservadas las rutas y formatos de configuracion, token OAuth y registro SQLite.
+
 ### Arranque del ejecutable
 
 - Corregida una colision de `icuuc.dll` que impedia importar QtCore: el paquete

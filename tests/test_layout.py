@@ -25,8 +25,8 @@ class ResponsiveLayoutTests(unittest.TestCase):
 
     def setUp(self):
         store = Mock()
-        store.load_config.return_value = ui.legacy.Config()
-        with patch.object(ui.legacy, "Store", return_value=store), \
+        store.load_config.return_value = ui.engine.Config()
+        with patch.object(ui.engine, "Store", return_value=store), \
                 patch.object(ui.MainWindow, "build_tray"), \
                 patch.object(ui.MainWindow, "refresh_all"):
             self.window = ui.MainWindow()

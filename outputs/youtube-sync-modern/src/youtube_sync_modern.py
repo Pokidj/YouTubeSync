@@ -1,4 +1,3 @@
-import importlib.util
 import os
 import queue
 import sys
@@ -49,34 +48,7 @@ APP_VERSION = "1.0"
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def load_legacy():
-    if getattr(sys, "frozen", False):
-        try:
-            import youtube_sync_app
-
-            return youtube_sync_app
-        except Exception:
-            pass
-    bundle_root = Path(getattr(sys, "_MEIPASS", ROOT))
-    candidates = [
-        bundle_root / "legacy" / "youtube_sync_app.py",
-        ROOT.parents[0] / "youtube-sync" / "src" / "youtube_sync_app.py",
-        ROOT / ".." / "youtube-sync" / "src" / "youtube_sync_app.py",
-    ]
-    legacy_src = next((path.resolve() for path in candidates if path.exists()), None)
-    if legacy_src is None:
-        checked = "\n".join(str(path) for path in candidates)
-        raise FileNotFoundError(f"No se encontro el motor estable de YouTubeSync. Rutas revisadas:\n{checked}")
-    spec = importlib.util.spec_from_file_location("youtube_sync_legacy", legacy_src)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("No se pudo cargar el motor estable de YouTubeSync.")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["youtube_sync_legacy"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-legacy = load_legacy()
+import youtube_sync_engine as engine
 
 
 def asset_path(name: str) -> Path:
@@ -154,11 +126,11 @@ class ChannelLoader(QObject):
 
     def run(self) -> None:
         try:
-            client = legacy.YouTubeClient(self.store, self.config, lambda _text: None)
+            client = engine.YouTubeClient(self.store, self.config, lambda _text: None)
             videos, playlists = client.channel_gallery()
             self.finished.emit(videos, playlists)
         except Exception as exc:
-            self.failed.emit(legacy.describe_error(exc))
+            self.failed.emit(engine.describe_error(exc))
 
 
 class OAuthWizard(QDialog):
@@ -370,8 +342,8 @@ class SettingsDialog(QWidget):
         youtube_layout.addLayout(self.field_row("Privacidad", self.privacy))
 
         self.category = QComboBox()
-        self.category.addItems(list(legacy.CATEGORIES.keys()))
-        self.category.setCurrentText(legacy.CATEGORY_NAMES_BY_ID.get(config.category_id, "Gente y blogs"))
+        self.category.addItems(list(engine.CATEGORIES.keys()))
+        self.category.setCurrentText(engine.CATEGORY_NAMES_BY_ID.get(config.category_id, "Gente y blogs"))
         youtube_layout.addLayout(self.field_row("Categoria", self.category))
 
         playlist = tracked_section(youtube_tab_layout, "Lista de reproduccion", "playlist lista cargar crear")
@@ -507,10 +479,10 @@ class SettingsDialog(QWidget):
         try:
             temp_config = replace(self.config)
             temp_config.client_secret_path = path
-            client = legacy.YouTubeClient(self.store, temp_config, lambda _text: None)
+            client = engine.YouTubeClient(self.store, temp_config, lambda _text: None)
             self.set_playlist_options(client.playlists(), selected_id=self.config.playlist_id)
         except Exception as exc:
-            QMessageBox.warning(self, "Listas", f"No se pudieron cargar las listas:\n\n{legacy.describe_error(exc)}")
+            QMessageBox.warning(self, "Listas", f"No se pudieron cargar las listas:\n\n{engine.describe_error(exc)}")
 
     def set_playlist_options(self, playlists: list[dict], selected_id: str = "") -> None:
         self.playlists_by_label = {}
@@ -543,20 +515,20 @@ class SettingsDialog(QWidget):
             temp_config = replace(self.config)
             temp_config.client_secret_path = path
             temp_config.privacy_status = {"Privado": "private", "Oculto": "unlisted", "Publico": "public"}[self.privacy.currentText()]
-            client = legacy.YouTubeClient(self.store, temp_config, lambda _text: None)
+            client = engine.YouTubeClient(self.store, temp_config, lambda _text: None)
             created = client.create_playlist(name.strip(), temp_config.privacy_status)
             playlists = client.playlists()
             self.set_playlist_options(playlists, selected_id=created["id"])
             QMessageBox.information(self, "Crear lista", "Lista creada correctamente.")
         except Exception as exc:
-            QMessageBox.warning(self, "Crear lista", f"No se pudo crear la lista:\n\n{legacy.describe_error(exc)}")
+            QMessageBox.warning(self, "Crear lista", f"No se pudo crear la lista:\n\n{engine.describe_error(exc)}")
 
     def save(self) -> None:
         privacy = {"Privado": "private", "Oculto": "unlisted", "Publico": "public"}[self.privacy.currentText()]
         self.config.watch_folder = self.folder.text().strip()
         self.config.client_secret_path = self.oauth.text().strip()
         self.config.privacy_status = privacy
-        self.config.category_id = legacy.CATEGORIES.get(self.category.currentText(), "22")
+        self.config.category_id = engine.CATEGORIES.get(self.category.currentText(), "22")
         playlist_label = self.playlist_combo.currentText() or "Ninguna"
         self.config.playlist_id = self.playlists_by_label.get(playlist_label, "")
         self.config.playlist_name = playlist_label
@@ -573,7 +545,7 @@ class SettingsDialog(QWidget):
         self.config.auto_delete_after_unit = self.cleanup_unit.currentText()
         self.store.save_config(self.config)
         try:
-            legacy.set_run_at_startup(self.config.run_at_startup)
+            engine.set_run_at_startup(self.config.run_at_startup)
         except Exception:
             pass
         self.saved.emit()
@@ -607,7 +579,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.store = legacy.Store()
+        self.store = engine.Store()
         self.config = self.store.load_config()
         self.events = queue.Queue()
         self.worker = None
@@ -1136,7 +1108,7 @@ class MainWindow(QMainWindow):
             self.worker.set_enabled(self.auto_enabled)
             self.worker.refresh()
             return
-        self.worker = legacy.SyncWorker(self.store, lambda: self.config, self.events)
+        self.worker = engine.SyncWorker(self.store, lambda: self.config, self.events)
         self.worker.start()
         self.worker.set_enabled(self.auto_enabled)
 
@@ -1176,7 +1148,7 @@ class MainWindow(QMainWindow):
 
     def refresh_config_card(self) -> None:
         folder = self.config.watch_folder or "Sin carpeta"
-        category = legacy.CATEGORY_NAMES_BY_ID.get(self.config.category_id, self.config.category_id)
+        category = engine.CATEGORY_NAMES_BY_ID.get(self.config.category_id, self.config.category_id)
         playlist = self.config.playlist_name if self.config.playlist_id else "Sin lista"
         self.config_card.set("Listo" if self.config.watch_folder else "Pendiente", f"{folder}\n{category} / {playlist}")
 
@@ -1204,10 +1176,10 @@ class MainWindow(QMainWindow):
         counts = {"Pendiente": 0, "Subido": 0, "Incidencia": 0, "En curso": 0}
         for _, path in sorted(paths, key=lambda item: item[0]):
             try:
-                signature = legacy.file_signature(path)
-                title = legacy.creation_title(path)
-                size = legacy.human_size(path.stat().st_size)
-                created = legacy.datetime.fromtimestamp(path.stat().st_ctime).strftime("%Y-%m-%d %H:%M:%S")
+                signature = engine.file_signature(path)
+                title = engine.creation_title(path)
+                size = engine.human_size(path.stat().st_size)
+                created = engine.datetime.fromtimestamp(path.stat().st_ctime).strftime("%Y-%m-%d %H:%M:%S")
             except OSError:
                 continue
             registry_row = registry_by_signature.get(signature) or registry_by_path.get(str(path))
@@ -1317,7 +1289,7 @@ class MainWindow(QMainWindow):
         threading.Thread(target=self._delete_local_verified_thread, args=([item],), daemon=True).start()
 
     def run_configured_cleanup(self) -> None:
-        older_than = legacy.datetime.now() - self.config.auto_delete_delay
+        older_than = engine.datetime.now() - self.config.auto_delete_delay
         rows = [row for row in self.store.uploaded_before(older_than, 2000) if Path(row[4]).exists()]
         if not rows:
             QMessageBox.information(self, "Limpieza", "No hay archivos locales subidos que cumplan el tiempo configurado.")
@@ -1335,10 +1307,10 @@ class MainWindow(QMainWindow):
         deleted = 0
         errors = []
         try:
-            client = legacy.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
+            client = engine.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
             client.uploaded_video_index(force=True)
         except Exception as exc:
-            self.events.put(("local_delete_result", {"deleted": 0, "errors": [f"No se pudo comprobar YouTube: {legacy.describe_error(exc)}"]}))
+            self.events.put(("local_delete_result", {"deleted": 0, "errors": [f"No se pudo comprobar YouTube: {engine.describe_error(exc)}"]}))
             return
         for item in items:
             path = Path(item["path"])
@@ -1347,7 +1319,7 @@ class MainWindow(QMainWindow):
                     self.store.mark_local_deleted(item["signature"])
                     deleted += 1
                     continue
-                if legacy.file_signature(path) != item["signature"]:
+                if engine.file_signature(path) != item["signature"]:
                     errors.append(f"{path.name}: el archivo local ha cambiado desde la subida")
                     continue
                 confirmed, resolved_id, reason, remote_state = client.verify_local_file(path, item["title"], item.get("youtube_id", ""))
@@ -1360,7 +1332,7 @@ class MainWindow(QMainWindow):
                 self.store.mark_local_deleted(item["signature"])
                 deleted += 1
             except Exception as exc:
-                errors.append(f"{path.name}: {legacy.describe_error(exc)}")
+                errors.append(f"{path.name}: {engine.describe_error(exc)}")
         self.events.put(("local_delete_result", {"deleted": deleted, "errors": errors}))
 
     def check_youtube(self) -> None:
@@ -1374,11 +1346,11 @@ class MainWindow(QMainWindow):
 
     def _check_youtube_thread(self) -> None:
         try:
-            client = legacy.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
+            client = engine.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
             info = client.channel_info()
             self.events.put(("youtube", info))
         except Exception as exc:
-            self.events.put(("youtube_error", legacy.describe_error(exc)))
+            self.events.put(("youtube_error", engine.describe_error(exc)))
 
     def tab_changed(self, index: int) -> None:
         if self.tabs.tabText(index) == "Canal" and self.channel_table.rowCount() == 0:
@@ -1654,11 +1626,11 @@ class MainWindow(QMainWindow):
 
     def _share_channel_video_thread(self, video: dict) -> None:
         try:
-            client = legacy.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
+            client = engine.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
             client.set_video_unlisted(video["id"])
             self.events.put(("channel_shared", video))
         except Exception as exc:
-            self.events.put(("channel_error", f"No se pudo compartir el video: {legacy.describe_error(exc)}"))
+            self.events.put(("channel_error", f"No se pudo compartir el video: {engine.describe_error(exc)}"))
 
     def change_selected_channel_privacy(self) -> None:
         videos = self.selected_channel_videos()
@@ -1677,17 +1649,17 @@ class MainWindow(QMainWindow):
         updated = []
         errors = []
         try:
-            client = legacy.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
+            client = engine.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
             for video in videos:
                 try:
                     client.set_video_privacy(video["id"], privacy)
                     video["privacy"] = privacy
                     updated.append(video)
                 except Exception as exc:
-                    errors.append(f"{video.get('title', video.get('id', ''))}: {legacy.describe_error(exc)}")
+                    errors.append(f"{video.get('title', video.get('id', ''))}: {engine.describe_error(exc)}")
             self.events.put(("channel_privacy_changed", {"updated": updated, "errors": errors}))
         except Exception as exc:
-            self.events.put(("channel_error", f"No se pudo cambiar privacidad: {legacy.describe_error(exc)}"))
+            self.events.put(("channel_error", f"No se pudo cambiar privacidad: {engine.describe_error(exc)}"))
 
     def delete_selected_channel_videos(self) -> None:
         videos = self.selected_channel_videos()
@@ -1704,16 +1676,16 @@ class MainWindow(QMainWindow):
         deleted = []
         errors = []
         try:
-            client = legacy.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
+            client = engine.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
             for video in videos:
                 try:
                     client.delete_video(video["id"])
                     deleted.append(video)
                 except Exception as exc:
-                    errors.append(f"{video.get('title', video.get('id', ''))}: {legacy.describe_error(exc)}")
+                    errors.append(f"{video.get('title', video.get('id', ''))}: {engine.describe_error(exc)}")
             self.events.put(("channel_deleted", {"deleted": deleted, "errors": errors}))
         except Exception as exc:
-            self.events.put(("channel_error", f"No se pudo borrar del canal: {legacy.describe_error(exc)}"))
+            self.events.put(("channel_error", f"No se pudo borrar del canal: {engine.describe_error(exc)}"))
 
     def change_selected_channel_playlist(self) -> None:
         videos = self.selected_channel_videos()
@@ -1735,11 +1707,11 @@ class MainWindow(QMainWindow):
 
     def _change_channel_playlist_thread(self, video: dict, target_id: str) -> None:
         try:
-            client = legacy.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
+            client = engine.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
             client.replace_video_playlist(video["id"], video.get("memberships", []), target_id)
             self.events.put(("channel_playlist_changed", "Lista actualizada correctamente."))
         except Exception as exc:
-            self.events.put(("channel_error", f"No se pudo cambiar la lista: {legacy.describe_error(exc)}"))
+            self.events.put(("channel_error", f"No se pudo cambiar la lista: {engine.describe_error(exc)}"))
 
     def channel_duplicate_key(self, video: dict) -> tuple | None:
         title = " ".join(str(video.get("title", "")).split()).casefold()

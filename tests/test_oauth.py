@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from test_layout import ui
 
-engine = ui.legacy
+engine = ui.engine
 
 
 class OAuthTests(unittest.TestCase):

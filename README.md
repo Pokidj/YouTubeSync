@@ -31,7 +31,7 @@ de Ajustes es una reserva para futuras versiones y todavia no esta operativo.
 
 ## Desarrollo
 
-Requiere Windows y Python 3.12 con Tkinter (el motor compartido lo importa).
+Requiere Windows y Python 3.12. La unica interfaz activa es PySide6/Qt.
 
 ```powershell
 python -m venv outputs/youtube-sync-modern/.venv
@@ -42,7 +42,7 @@ python -m venv outputs/youtube-sync-modern/.venv
 ## Compilar
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File outputs/youtube-sync-modern/build_exe.ps1
+powershell -ExecutionPolicy Bypass -File build_exe.ps1
 ```
 
 El ejecutable se genera en
@@ -51,12 +51,17 @@ Para distribuirlo se necesita la carpeta `YouTubeSync` completa, incluido `_inte
 
 ## Estructura
 
-- `outputs/youtube-sync-modern`: interfaz actual, recursos y compilacion.
-- `outputs/youtube-sync`: motor compartido y aplicacion anterior conservada.
-- `tests`: comprobaciones de disposicion de la interfaz sin conectar con YouTube.
+- `outputs/youtube-sync-modern`: unico proyecto activo, con interfaz Qt y motor propio.
+- `archive/youtube-sync-legacy`: copia historica, excluida de las compilaciones.
+- `tests`: pruebas de Qt, OAuth y compatibilidad de datos locales.
 
-Se conservan las rutas internas para mantener compatible la compilacion.
-La aplicacion y el ejecutable se llaman YouTubeSync.
+Para abrir la app utiliza **Abrir-YouTubeSync.cmd** en la raiz del repositorio.
+Este es el unico punto de entrada recomendado. La app se llama YouTubeSync;
+la carpeta `modern` identifica el proyecto Qt en desarrollo.
+
+El motor esta en `outputs/youtube-sync-modern/src/youtube_sync_engine.py`.
+No depende de la aplicacion archivada. Se mantiene `%APPDATA%\YouTubeSync`
+para conservar configuracion, token y registro de subidas.
 
 ## Configuracion
 

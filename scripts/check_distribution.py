@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-for project in ("youtube-sync", "youtube-sync-modern"):
+for project in ("youtube-sync-modern",):
     folder = root / "outputs" / project / "dist/YouTubeSync"
     executable = folder / "YouTubeSync.exe"
     for name in ("python312.dll", "codex-rejected-cas.pem"):

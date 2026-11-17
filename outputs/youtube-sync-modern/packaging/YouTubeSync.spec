@@ -1,15 +1,14 @@
 from pathlib import Path
 
 root = Path(SPECPATH).parent
-engine = root.parent / "youtube-sync"
 
 a = Analysis(
     [str(root / "src/youtube_sync_modern.py")],
-    pathex=[str(engine / "src")],
+    pathex=[str(root / "src")],
     binaries=[],
-    datas=[(str(root / "assets"), "assets"), (str(engine / "src/youtube_sync_app.py"), "legacy")],
-    hiddenimports=["youtube_sync_app"],
-    hookspath=[str(engine / "build_hooks")],
+    datas=[(str(root / "assets"), "assets")],
+    hiddenimports=["youtube_sync_engine"],
+    hookspath=[str(root / "build_hooks")],
     hooksconfig={}, runtime_hooks=[], excludes=[], noarchive=False, optimize=0,
 )
 # Qt uses the Windows ICU API. A same-named DLL on PATH can expose incompatible exports.

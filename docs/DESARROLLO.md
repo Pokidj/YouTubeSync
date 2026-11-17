@@ -2,7 +2,7 @@
 
 ## Requisitos
 
-- Windows y Python 3.12 con Tkinter.
+- Windows y Python 3.12.
 - Dependencias de `outputs/youtube-sync-modern/requirements.txt`.
 - JSON OAuth propio y conexion solo para probar operaciones reales con YouTube.
 
@@ -24,14 +24,15 @@ el nombre visible del producto es YouTubeSync.
 | Ruta | Responsabilidad |
 | --- | --- |
 | `outputs/youtube-sync-modern/src/youtube_sync_modern.py` | Ventana Qt, ajustes, tablas, canal, miniaturas, bandeja y acciones. |
-| `outputs/youtube-sync/src/youtube_sync_app.py` | Motor compartido: configuracion, SQLite, OAuth, cliente YouTube y trabajador de sincronizacion. Tambien contiene la interfaz anterior. |
+| `outputs/youtube-sync-modern/src/youtube_sync_engine.py` | Motor independiente: configuracion, SQLite, OAuth, cliente YouTube y sincronizacion. |
 | `outputs/youtube-sync-modern/assets` | Icono y logo de la interfaz actual. |
 | `outputs/youtube-sync-modern/build_exe.ps1` | Empaquetado Windows con PyInstaller. |
 | `tests/test_layout.py` | Pruebas de la disposicion sin operaciones reales sobre YouTube. |
 
-La interfaz carga el motor compartido desde la carpeta hermana en desarrollo
-y desde el paquete generado en la compilacion. Por ello deben conservarse
-ambas carpetas al clonar o distribuir el codigo fuente.
+La interfaz importa directamente `youtube_sync_engine` desde su propio proyecto.
+No hay carga dinamica de archivos de la aplicacion anterior. `archive` conserva
+la copia historica y no forma parte de la compilacion ni de las pruebas activas.
+El proyecto moderno no necesita Tkinter, Pillow ni pystray.
 
 Las operaciones de red se delegan a hilos y devuelven resultados a la interfaz
 mediante senales o la cola de eventos. La tabla del canal se rellena por lotes.
@@ -42,7 +43,7 @@ sin decodificarla durante cada redimensionado.
 
 ```powershell
 ./outputs/youtube-sync-modern/.venv/Scripts/python.exe -m unittest discover -s tests -v
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe -m py_compile outputs/youtube-sync-modern/src/youtube_sync_modern.py outputs/youtube-sync/src/youtube_sync_app.py
+./outputs/youtube-sync-modern/.venv/Scripts/python.exe -m py_compile outputs/youtube-sync-modern/src/youtube_sync_modern.py outputs/youtube-sync-modern/src/youtube_sync_engine.py
 git diff --check
 ```
 
@@ -51,10 +52,9 @@ Comprueban tres tamanos de ventana, proporcion de miniaturas, contenido largo,
 acceso al boton Reproducir y redistribucion al cambiar el separador.
 No validan OAuth, subidas, borrado remoto ni el instalable ejecutandose.
 
-`test_legacy_layout.py` abre ventanas Tk de prueba, con almacenamiento y
-operaciones de red sustituidos, para comprobar que las tres pestanas de la
-interfaz anterior mantienen las tablas visibles en modo ventana. Estas pruebas
-requieren una sesion de escritorio disponible.
+Las pruebas de la interfaz Tk quedaron archivadas con su version. Las pruebas
+activas se centran exclusivamente en Qt y su motor. La extraccion del motor
+conserva la ruta de datos y los formatos de configuracion, token y SQLite.
 
 Para validar esas operaciones, utiliza archivos y videos de prueba y verifica
 los resultados en YouTube y en disco. Revisa especialmente cancelacion,
@@ -63,12 +63,12 @@ reintento, persistencia al reiniciar y conservacion de archivos ante discrepanci
 ## Compilar y distribuir
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File outputs/youtube-sync-modern/build_exe.ps1
+powershell -ExecutionPolicy Bypass -File build_exe.ps1
 ```
 
 El script prepara las dependencias y genera:
 
-Los scripts cargan `outputs/youtube-sync/build_hooks/hook-ssl.py`. Este hook
+Los scripts cargan `outputs/youtube-sync-modern/build_hooks/hook-ssl.py`. Este hook
 incluye el archivo de confianza auxiliar si el runtime de Python lo requiere.
 Si se invoca PyInstaller directamente, hay que conservar `--additional-hooks-dir`
 con esa carpeta: una compilacion correcta no garantiza que HTTPS funcione si
@@ -97,15 +97,14 @@ Despues de compilar, comprueba el ejecutable real desde su carpeta `dist`:
 
 ```powershell
 ./outputs/youtube-sync-modern/dist/YouTubeSync/YouTubeSync.exe --self-test ./qt-startup.json
-./outputs/youtube-sync/dist/YouTubeSync/YouTubeSync.exe --self-test ./tk-startup.json
 ```
 
-Cada comando genera un informe con `ok: true` al terminar correctamente. Este
+El comando genera un informe con `ok: true` al terminar correctamente. Este
 modo no carga la base de datos ni inicia OAuth. Los ejecutables de `build` son
 intermedios y no pueden ejecutarse por separado. Los lanzadores
-`Abrir-YouTubeSync.cmd` de cada proyecto apuntan a la distribucion correcta.
+`Abrir-YouTubeSync.cmd` de la raiz apunta a la unica distribucion activa.
 
-Puedes comprobar ambas distribuciones y sus archivos auxiliares con:
+Puedes comprobar la distribucion Qt y sus archivos auxiliares con:
 
 ```powershell
 ./outputs/youtube-sync-modern/.venv/Scripts/python.exe scripts/check_distribution.py
