@@ -51,6 +51,11 @@ Comprueban tres tamanos de ventana, proporcion de miniaturas, contenido largo,
 acceso al boton Reproducir y redistribucion al cambiar el separador.
 No validan OAuth, subidas, borrado remoto ni el instalable ejecutandose.
 
+`test_legacy_layout.py` abre ventanas Tk de prueba, con almacenamiento y
+operaciones de red sustituidos, para comprobar que las tres pestanas de la
+interfaz anterior mantienen las tablas visibles en modo ventana. Estas pruebas
+requieren una sesion de escritorio disponible.
+
 Para validar esas operaciones, utiliza archivos y videos de prueba y verifica
 los resultados en YouTube y en disco. Revisa especialmente cancelacion,
 reintento, persistencia al reiniciar y conservacion de archivos ante discrepancias.

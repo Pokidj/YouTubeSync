@@ -96,6 +96,24 @@ class ResponsiveLayoutTests(unittest.TestCase):
         for pill in self.window.channel_info_pills:
             self.assertGreaterEqual(pill.height(), pill.minimumSizeHint().height())
 
+    def test_tables_are_read_only(self):
+        for table in (self.window.video_table, self.window.channel_table):
+            self.assertEqual(table.editTriggers(), ui.QAbstractItemView.NoEditTriggers)
+
+    def test_event_batch_yields_to_ui(self):
+        for index in range(250):
+            self.window.events.put(("log", f"Log {index}"))
+        self.window.process_events()
+        self.assertEqual(self.window.events.qsize(), 150)
+        self.assertLessEqual(self.window.console.document().maximumBlockCount(), 2000)
+
+    def test_settings_reuses_open_window(self):
+        self.window.open_settings()
+        first = self.window.settings_dialog
+        self.window.open_settings()
+        self.assertIs(self.window.settings_dialog, first)
+        first.close()
+
 
 if __name__ == "__main__":
     unittest.main()

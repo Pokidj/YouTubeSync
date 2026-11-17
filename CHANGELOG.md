@@ -5,6 +5,23 @@ asignarles una nueva version. La version mostrada por la app sigue siendo 1.0.
 
 ## Sin publicar
 
+### Revision de la interfaz en modo ventana
+
+- Corregida la altura del contenedor de la interfaz anterior para que las
+  tablas permanezcan visibles en vez de quedar por debajo de la ventana.
+- Cabecera, progreso y contadores mas compactos; se conservan las acciones
+  especificas de pendientes, limpieza y canal.
+- Contadores separados de pendientes, en curso e incidencias para evitar contar
+  dos veces el mismo video en el resumen.
+- Controles del canal agrupados y desplazamiento de respaldo en ventanas bajas.
+- Eliminados bordes claros ajenos a la paleta oscura en la interfaz anterior.
+- En Qt, tablas de solo lectura, una sola ventana de Ajustes y consola
+  limitada a los ultimos 2000 bloques visibles; el registro persistente se conserva.
+- Procesamiento de eventos Qt en lotes para devolver tiempo a la interfaz.
+- Escaneo Qt tolerante a archivos que desaparecen durante la ordenacion.
+- Pruebas ampliadas a las tres pestanas de la interfaz anterior y a la
+  accesibilidad de tablas, acciones y controles en Qt.
+
 ### Corregido
 
 - Miniatura del panel Canal con proporcion estable y escalado sin deformacion.

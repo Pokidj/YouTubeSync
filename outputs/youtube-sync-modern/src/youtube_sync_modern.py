@@ -612,6 +612,7 @@ class MainWindow(QMainWindow):
         self.events = queue.Queue()
         self.worker = None
         self._allow_exit = False
+        self.settings_dialog = None
         self.auto_enabled = bool(self.config.auto_start_enabled)
         self.channel_loader = None
         self.video_rows: dict[int, dict] = {}
@@ -647,6 +648,7 @@ class MainWindow(QMainWindow):
     def action_button(self, text: str, icon: QStyle.StandardPixmap | QIcon | None = None, danger: bool = False, primary: bool = False) -> QPushButton:
         button = QPushButton(text)
         button.setToolTip(text)
+        button.setAccessibleName(text)
         if icon is not None:
             button.setIcon(icon if isinstance(icon, QIcon) else self.style().standardIcon(icon))
             button.setIconSize(QSize(22, 22))
@@ -659,6 +661,7 @@ class MainWindow(QMainWindow):
     def icon_button(self, tooltip: str, icon: QStyle.StandardPixmap | QIcon, danger: bool = False, primary: bool = False) -> QPushButton:
         button = self.action_button("", icon, danger=danger, primary=primary)
         button.setToolTip(tooltip)
+        button.setAccessibleName(tooltip)
         button.setMinimumWidth(46)
         button.setMaximumWidth(54)
         return button
@@ -699,6 +702,8 @@ class MainWindow(QMainWindow):
         title.setObjectName("AppTitle")
         self.status = QLabel("Preparado")
         self.status.setObjectName("Muted")
+        self.status.setWordWrap(True)
+        self.status.setMinimumWidth(0)
         title_box.addWidget(title)
         title_box.addWidget(self.status)
         header.addLayout(title_box, 1)
@@ -745,10 +750,11 @@ class MainWindow(QMainWindow):
         progress_frame.setObjectName("Card")
         progress_layout = QVBoxLayout(progress_frame)
         self.progress_layout = progress_layout
-        progress_layout.addWidget(QLabel("Progreso de subida"))
+        progress_layout.setDirection(QVBoxLayout.LeftToRight)
+        progress_layout.addWidget(QLabel("Subida"))
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
-        progress_layout.addWidget(self.progress)
+        progress_layout.addWidget(self.progress, 1)
         main.addWidget(progress_frame)
 
         self.tabs = QTabWidget()
@@ -964,6 +970,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(bar)
         self.console = QTextEdit()
         self.console.setReadOnly(True)
+        self.console.document().setMaximumBlockCount(2000)
         layout.addWidget(self.console, 1)
         return page
 
@@ -975,6 +982,8 @@ class MainWindow(QMainWindow):
         table.horizontalHeader().setStretchLastSection(True)
         table.setSelectionBehavior(QTableWidget.SelectRows)
         table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.horizontalHeader().setResizeContentsPrecision(100)
 
     def configure_channel_table_columns(self) -> None:
         header = self.channel_table.horizontalHeader()
@@ -1107,7 +1116,7 @@ class MainWindow(QMainWindow):
                 self.channel_info_grid.addWidget(label, index, 0)
 
     def show_from_tray(self) -> None:
-        self.showNormal()
+        self.show()
         self.raise_()
         self.activateWindow()
 
@@ -1178,13 +1187,21 @@ class MainWindow(QMainWindow):
         if not folder or not folder.exists():
             self.video_summary.setText("Configura una carpeta valida.")
             self.state_card.set("Sin carpeta", "Abre ajustes para configurarla.")
+            self.video_table.setSortingEnabled(True)
             return
         pattern = "**/*" if self.config.recursive else "*"
-        paths = [p for p in folder.glob(pattern) if p.is_file() and p.suffix.lower() in self.config.extension_set]
+        paths = []
+        extensions = self.config.extension_set
+        for path in folder.glob(pattern):
+            try:
+                if path.suffix.lower() in extensions and path.is_file():
+                    paths.append((path.stat().st_ctime, path))
+            except OSError:
+                continue
         registry_by_signature, registry_by_path = self.store.registry_index()
         statuses_by_signature, statuses_by_path = self.store.upload_status_index()
         counts = {"Pendiente": 0, "Subido": 0, "Incidencia": 0, "En curso": 0}
-        for path in sorted(paths, key=lambda item: item.stat().st_ctime):
+        for _, path in sorted(paths, key=lambda item: item[0]):
             try:
                 signature = legacy.file_signature(path)
                 title = legacy.creation_title(path)
@@ -1766,12 +1783,19 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, APP_NAME, self.channel_summary.text())
 
     def open_settings(self) -> None:
+        if self.settings_dialog is not None:
+            self.settings_dialog.raise_()
+            self.settings_dialog.activateWindow()
+            return
         dialog = SettingsDialog(self.store, self.config, self)
+        self.settings_dialog = dialog
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+        dialog.destroyed.connect(lambda: setattr(self, "settings_dialog", None))
         dialog.saved.connect(lambda: self.refresh_all(light=False))
         dialog.show()
 
     def process_events(self) -> None:
-        while True:
+        for _ in range(100):
             try:
                 kind, value = self.events.get_nowait()
             except queue.Empty:
@@ -1856,12 +1880,12 @@ def apply_style(app: QApplication) -> None:
         }
         #AppTitle {
             background: transparent;
-            font-size: 24pt;
+            font-size: 20pt;
             font-weight: 800;
         }
         #PageTitle {
             background: transparent;
-            font-size: 18pt;
+            font-size: 15pt;
             font-weight: 800;
         }
         #Muted, #CardDetail {
@@ -1878,7 +1902,7 @@ def apply_style(app: QApplication) -> None:
             color: #a7adb8;
             font-size: 9pt;
             font-weight: 700;
-            letter-spacing: 1px;
+            letter-spacing: 0;
         }
         #CardValue {
             background: transparent;
@@ -1921,7 +1945,7 @@ def apply_style(app: QApplication) -> None:
             color: #ff3157;
             font-size: 9pt;
             font-weight: 800;
-            letter-spacing: 1px;
+            letter-spacing: 0;
         }
         QPushButton, QToolButton {
             background: #24252b;
@@ -1934,6 +1958,14 @@ def apply_style(app: QApplication) -> None:
         QPushButton:hover, QToolButton:hover {
             background: #31323b;
             border-color: #5b5d6a;
+        }
+        QPushButton:disabled, QToolButton:disabled {
+            color: #757b87;
+            background: #1c1d21;
+            border-color: #282a30;
+        }
+        QPushButton:focus, QToolButton:focus, QLineEdit:focus, QComboBox:focus {
+            border-color: #ff3157;
         }
         QPushButton:pressed, QToolButton:pressed {
             background: #444652;

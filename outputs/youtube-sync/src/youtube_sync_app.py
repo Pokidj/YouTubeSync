@@ -2063,7 +2063,7 @@ class App(tk.Tk):
         blue = "#3ea6ff"
         style.configure(".", background=bg, foreground=text, fieldbackground=panel, font=("Segoe UI", 10))
         style.configure("TFrame", background=bg)
-        style.configure("Panel.TFrame", background=panel, borderwidth=1, relief="solid", bordercolor="#303030")
+        style.configure("Panel.TFrame", background=panel, borderwidth=0, relief="flat")
         style.configure("PanelInner.TFrame", background=panel, borderwidth=0)
         style.configure("Toolbar.TFrame", background="#141414")
         style.configure("Header.TFrame", background=accent)
@@ -2088,9 +2088,10 @@ class App(tk.Tk):
         style.configure("StatIssue.TLabel", background=panel, foreground="#f6b73c", font=("Segoe UI", 18, "bold"))
         style.configure("TLabelFrame", background=bg, foreground=text, bordercolor=panel2)
         style.configure("TLabelFrame.Label", background=bg, foreground=muted)
-        style.configure("TNotebook", background=bg, borderwidth=0)
-        style.configure("TNotebook.Tab", background="#181818", foreground=muted, padding=(18, 11), borderwidth=0, font=("Segoe UI", 10, "bold"))
+        style.configure("TNotebook", background=bg, borderwidth=0, bordercolor=bg, lightcolor=bg, darkcolor=bg, tabmargins=(0, 0, 0, 0))
+        style.configure("TNotebook.Tab", background="#181818", foreground=muted, padding=(16, 8), borderwidth=0, font=("Segoe UI", 10, "bold"))
         style.map("TNotebook.Tab", background=[("selected", "#272727")], foreground=[("selected", accent)])
+        style.configure("TNotebook.Tab", bordercolor="#303030", lightcolor="#303030", darkcolor="#303030")
         style.configure("TButton", background=panel2, foreground=text, borderwidth=0, padding=(14, 9), font=("Segoe UI", 10, "bold"))
         style.map("TButton", background=[("active", "#3a3a3a")])
         style.configure("Accent.TButton", background=accent, foreground="#ffffff")
@@ -2121,7 +2122,7 @@ class App(tk.Tk):
             selectbackground=[("readonly", "#101010")],
             selectforeground=[("readonly", text)],
         )
-        style.configure("Treeview", background="#141414", foreground=text, fieldbackground="#141414", borderwidth=0, rowheight=32, font=("Segoe UI", 10))
+        style.configure("Treeview", background="#141414", foreground=text, fieldbackground="#141414", borderwidth=0, bordercolor="#272727", lightcolor="#272727", darkcolor="#272727", rowheight=32, font=("Segoe UI", 10))
         style.configure("Treeview.Heading", background="#272727", foreground="#ffffff", borderwidth=0, padding=(8, 8), font=("Segoe UI", 9, "bold"))
         style.map("Treeview", background=[("selected", "#3b1b22")], foreground=[("selected", "#ffffff")])
         style.configure("Horizontal.TProgressbar", troughcolor="#272727", background=accent, bordercolor="#272727", lightcolor=accent, darkcolor=accent, thickness=9)
@@ -2134,14 +2135,16 @@ class App(tk.Tk):
         self.main_canvas = tk.Canvas(viewport, bg="#0f0f0f", highlightthickness=0)
         self.main_canvas.grid(row=0, column=0, sticky="nsew")
 
-        root = ttk.Frame(self.main_canvas, padding=18)
+        root = ttk.Frame(self.main_canvas, padding=12)
+        self.main_root = root
         self.main_window = self.main_canvas.create_window((0, 0), window=root, anchor="nw")
         root.bind("<Configure>", lambda _event: self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all")))
         self.main_canvas.bind("<Configure>", self.resize_main_content)
         self.bind_all("<MouseWheel>", self.scroll_main_content, add="+")
 
         header = ttk.Frame(root)
-        header.pack(fill="x", pady=(0, 14))
+        self.header_frame = header
+        header.pack(fill="x", pady=(0, 8))
         self.logo_label = ttk.Label(header)
         self.logo_label.pack(side="left", padx=(0, 14))
         title_area = ttk.Frame(header)
@@ -2153,7 +2156,8 @@ class App(tk.Tk):
         self.health_canvas = tk.Canvas(status_row, width=14, height=14, bg="#0f0f0f", highlightthickness=0)
         self.health_canvas.pack(side="left", padx=(0, 8))
         self.health_dot = self.health_canvas.create_oval(2, 2, 12, 12, fill="#f59e0b", outline="")
-        ttk.Label(status_row, textvariable=self.status_var, style="Muted.TLabel").pack(side="left")
+        self.header_status = ttk.Label(status_row, textvariable=self.status_var, style="Muted.TLabel", wraplength=440)
+        self.header_status.pack(side="left", fill="x", expand=True)
 
         actions = ttk.Frame(header)
         actions.pack(side="right")
@@ -2172,8 +2176,9 @@ class App(tk.Tk):
         ToolTip(settings_button, "Ajustes")
 
         cards = ttk.Frame(root)
-        cards.pack(fill="x", pady=(0, 14))
-        cards.rowconfigure(0, weight=1, minsize=118)
+        self.cards_frame = cards
+        cards.pack(fill="x", pady=(0, 8))
+        cards.rowconfigure(0, weight=1)
         for column in range(3):
             cards.columnconfigure(column, weight=1, uniform="header_cards")
         self.youtube_card = self.card(cards, "Estado", "Sin comprobar")
@@ -2184,16 +2189,16 @@ class App(tk.Tk):
         self.progress_card["frame"].grid(row=0, column=2, sticky="nsew")
 
         self.progress_var = tk.IntVar(value=0)
-        progress_panel = ttk.Frame(root, padding=(14, 10), style="Panel.TFrame")
-        progress_panel.pack(fill="x", pady=(0, 14))
-        ttk.Label(progress_panel, text="Progreso de subida", style="PanelMuted.TLabel").pack(anchor="w")
-        ttk.Progressbar(progress_panel, variable=self.progress_var, maximum=100).pack(fill="x", pady=(8, 0))
+        progress_panel = ttk.Frame(root, padding=(10, 6), style="Panel.TFrame")
+        progress_panel.pack(fill="x", pady=(0, 8))
+        ttk.Label(progress_panel, text="Subida", style="PanelMuted.TLabel").pack(side="left", padx=(0, 10))
+        ttk.Progressbar(progress_panel, variable=self.progress_var, maximum=100).pack(side="left", fill="x", expand=True)
 
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill="both", expand=True)
-        self.videos_tab = ttk.Frame(self.notebook, padding=14)
-        self.gallery_tab = ttk.Frame(self.notebook, padding=14)
-        self.console_tab = ttk.Frame(self.notebook, padding=14)
+        self.videos_tab = ttk.Frame(self.notebook, padding=8)
+        self.gallery_tab = ttk.Frame(self.notebook, padding=8)
+        self.console_tab = ttk.Frame(self.notebook, padding=8)
         self.notebook.add(self.videos_tab, text="Vídeos")
         self.notebook.add(self.gallery_tab, text="Canal")
         self.notebook.add(self.console_tab, text="Consola")
@@ -2206,31 +2211,39 @@ class App(tk.Tk):
         self.refresh_folder_contents(verify_youtube=False)
 
     def resize_main_content(self, event) -> None:
-        self.main_canvas.itemconfigure(self.main_window, width=max(1, event.width))
+        # A canvas window otherwise keeps its requested height, even when the app shrinks.
+        self.main_canvas.itemconfigure(self.main_window, width=max(1, event.width), height=max(640, event.height))
+        if hasattr(self, "header_status"):
+            self.header_status.configure(wraplength=max(180, event.width - 420))
+        self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
+        if event.height >= 640:
+            self.main_canvas.yview_moveto(0)
 
     def scroll_main_content(self, event) -> None:
         widget = event.widget
         if isinstance(widget, (ttk.Treeview, tk.Text, ttk.Combobox, ttk.Spinbox)):
             return
-        self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        bounds = self.main_canvas.bbox("all")
+        if bounds and bounds[3] > self.main_canvas.winfo_height():
+            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def card(self, parent: ttk.Frame, title: str, value: str) -> dict:
-        frame = ttk.Frame(parent, padding=14, style="Panel.TFrame")
+        frame = ttk.Frame(parent, padding=(10, 6), style="Panel.TFrame")
         ttk.Label(frame, text=title.upper(), style="CardTitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
         var = tk.StringVar(value=value)
         detail_var = tk.StringVar(value="")
         icon = tk.Label(frame, text="●", bg="#181818", fg="#aaaaaa", font=("Segoe UI", 16, "bold"), width=2)
-        icon.grid(row=1, column=0, rowspan=2, sticky="nw", pady=(7, 0), padx=(0, 8))
+        icon.grid(row=1, column=0, rowspan=2, sticky="nw", pady=(3, 0), padx=(0, 8))
         main_label = ttk.Label(frame, textvariable=var, style="CardMain.TLabel", wraplength=260)
         detail_label = ttk.Label(frame, textvariable=detail_var, style="CardDetail.TLabel", wraplength=260)
-        main_label.grid(row=1, column=1, sticky="ew", pady=(8, 0))
+        main_label.grid(row=1, column=1, sticky="ew", pady=(3, 0))
         detail_label.grid(row=2, column=1, sticky="ew", pady=(2, 0))
         frame.columnconfigure(1, weight=1)
         frame.bind("<Configure>", lambda event: self.resize_card_text(event, main_label, detail_label))
         return {"frame": frame, "var": var, "detail": detail_var, "icon": icon}
 
     def resize_card_text(self, event, main_label: ttk.Label, detail_label: ttk.Label) -> None:
-        wrap = max(180, event.width - 76)
+        wrap = max(100, event.width - 72)
         main_label.configure(wraplength=wrap)
         detail_label.configure(wraplength=wrap)
 
@@ -2277,7 +2290,7 @@ class App(tk.Tk):
 
     def build_videos_tab(self) -> None:
         top = ttk.Frame(self.videos_tab)
-        top.pack(fill="x", pady=(0, 12))
+        top.pack(fill="x", pady=(0, 6))
         ttk.Label(top, text="Biblioteca de vídeos", style="Title.TLabel").pack(side="left")
         self.folder_summary_var = tk.StringVar(value="Sin revisar")
         self.quota_summary_var = tk.StringVar(value="YouTube: sin comprobar")
@@ -2285,8 +2298,8 @@ class App(tk.Tk):
         videos_refresh_button.pack(side="right")
         ToolTip(videos_refresh_button, "Actualizar videos")
 
-        summary = ttk.Frame(self.videos_tab, padding=16, style="Panel.TFrame")
-        summary.pack(fill="x", pady=(0, 12))
+        summary = ttk.Frame(self.videos_tab, padding=(10, 3), style="Panel.TFrame")
+        summary.pack(fill="x", pady=(0, 6))
         self.total_count_var = tk.StringVar(value="0")
         self.pending_count_var = tk.StringVar(value="0")
         self.active_count_var = tk.StringVar(value="0")
@@ -2301,13 +2314,14 @@ class App(tk.Tk):
         ]
         for column, (label, variable, value_style) in enumerate(stats):
             summary.columnconfigure(column, weight=1, uniform="video_stats")
-            cell = ttk.Frame(summary, style="PanelInner.TFrame", padding=(12, 4))
+            cell = ttk.Frame(summary, style="PanelInner.TFrame", padding=(6, 2))
             cell.grid(row=0, column=column, sticky="ew")
-            ttk.Label(cell, text=label, style="StatLabel.TLabel").pack(anchor="w")
-            ttk.Label(cell, textvariable=variable, style=value_style).pack(anchor="w", pady=(2, 0))
-        ttk.Separator(summary, orient="horizontal").grid(row=1, column=0, columnspan=5, sticky="ew", pady=(12, 10))
-        ttk.Label(summary, textvariable=self.folder_summary_var, style="PanelMuted.TLabel").grid(row=2, column=0, columnspan=5, sticky="w")
-        ttk.Label(summary, textvariable=self.quota_summary_var, style="PanelMuted.TLabel").grid(row=3, column=0, columnspan=5, sticky="w", pady=(4, 0))
+            ttk.Label(cell, textvariable=variable, style=value_style).pack(side="left", padx=(0, 6))
+            ttk.Label(cell, text=label, style="StatLabel.TLabel").pack(side="left")
+        summary_status = ttk.Frame(summary, style="PanelInner.TFrame")
+        summary_status.grid(row=1, column=0, columnspan=5, sticky="ew", pady=(2, 0))
+        ttk.Label(summary_status, textvariable=self.folder_summary_var, style="PanelMuted.TLabel").pack(side="left")
+        ttk.Label(summary_status, textvariable=self.quota_summary_var, style="PanelMuted.TLabel").pack(side="right")
 
         self.videos_notebook = ttk.Notebook(self.videos_tab)
         self.videos_notebook.pack(fill="both", expand=True)
@@ -2320,9 +2334,11 @@ class App(tk.Tk):
         pending_top.pack(fill="x", pady=(0, 8))
         self.pending_summary_var = tk.StringVar(value="Videos que faltan por subir")
         ttk.Label(pending_top, textvariable=self.pending_summary_var, style="Muted.TLabel").pack(anchor="w")
-        self.incident_help_var = tk.StringVar(value="Selecciona un video para ver su estado y las acciones disponibles.")
-        ttk.Label(pending_top, textvariable=self.incident_help_var, style="PanelMuted.TLabel").pack(anchor="w", pady=(4, 7))
+        self.incident_help_var = tk.StringVar(value="")
+        self.incident_help_label = ttk.Label(pending_top, textvariable=self.incident_help_var, style="Muted.TLabel", wraplength=600)
+        self.incident_help_var.trace_add("write", self.toggle_incident_help)
         pending_actions = ttk.Frame(pending_top)
+        self.pending_actions = pending_actions
         pending_actions.pack(fill="x")
         retry_button = RoundedButton(pending_actions, "↻ Reintentar", self.retry_selected_incident, "HeaderAccentIcon.TButton", width=112, height=36)
         reset_button = RoundedButton(pending_actions, "✓ Pendiente", self.reset_selected_incident, "Soft.TButton", width=112, height=36)
@@ -2349,7 +2365,7 @@ class App(tk.Tk):
         pending_list = ttk.Frame(self.pending_tab)
         pending_list.pack(fill="both", expand=True)
         columns = ("nombre", "tamano", "creado", "estado", "detalle", "ruta")
-        self.pending_table = ttk.Treeview(pending_list, columns=columns, show="headings", height=16)
+        self.pending_table = ttk.Treeview(pending_list, columns=columns, show="headings", height=5)
         for key, label, width in [
             ("nombre", "Archivo pendiente", 280),
             ("tamano", "Tamaño", 90),
@@ -2402,7 +2418,7 @@ class App(tk.Tk):
         cleanup_list = ttk.Frame(self.uploaded_tab)
         cleanup_list.pack(fill="both", expand=True)
         columns = ("fecha", "titulo", "archivo", "tamano", "youtube")
-        self.cleanup_table = ttk.Treeview(cleanup_list, columns=columns, show="headings", height=16)
+        self.cleanup_table = ttk.Treeview(cleanup_list, columns=columns, show="headings", height=5)
         for key, label, width in [
             ("fecha", "Subido", 150),
             ("titulo", "Titulo", 190),
@@ -2423,6 +2439,12 @@ class App(tk.Tk):
         self.cleanup_table.configure(yscrollcommand=scrollbar.set, xscrollcommand=xscrollbar.set)
         self.cleanup_table.tag_configure("uploaded", foreground="#64d879")
         self.cleanup_table.bind("<Double-1>", self.open_cleanup_selection)
+
+    def toggle_incident_help(self, *_args) -> None:
+        if self.incident_help_var.get():
+            self.incident_help_label.pack(anchor="w", fill="x", pady=(0, 4), before=self.pending_actions)
+        else:
+            self.incident_help_label.pack_forget()
 
     def build_gallery_tab(self) -> None:
         top = ttk.Frame(self.gallery_tab)
@@ -2459,8 +2481,8 @@ class App(tk.Tk):
         filters.pack(fill="x", pady=(0, 8))
         ttk.Label(filters, text="Buscar", style="Muted.TLabel").pack(side="left", padx=(0, 8))
         self.gallery_search_var = tk.StringVar()
-        search_entry = ttk.Entry(filters, textvariable=self.gallery_search_var, width=32)
-        search_entry.pack(side="left", padx=(0, 8))
+        search_entry = ttk.Entry(filters, textvariable=self.gallery_search_var, width=18)
+        search_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.gallery_privacy_filter_var = tk.StringVar(value="Todas")
         privacy_filter = ttk.Combobox(
             filters,
@@ -2473,7 +2495,7 @@ class App(tk.Tk):
         self.gallery_playlist_filter_var = tk.StringVar(value="Todas")
         self.gallery_playlist_filter_combo = ttk.Combobox(
             filters, textvariable=self.gallery_playlist_filter_var, values=("Todas", "Sin lista"),
-            state="readonly", width=24,
+            state="readonly", width=16,
         )
         self.gallery_playlist_filter_combo.pack(side="left", padx=(0, 8))
         clear_filters = RoundedButton(filters, "×", self.clear_gallery_filters, "Soft.TButton", width=38, height=32)
@@ -2510,10 +2532,10 @@ class App(tk.Tk):
 
         playlist_bar = ttk.Frame(self.gallery_tab)
         playlist_bar.pack(fill="x", pady=(0, 8))
-        ttk.Label(playlist_bar, text="Lista de reproducción", style="Muted.TLabel").pack(side="left", padx=(0, 10))
+        ttk.Label(playlist_bar, text="Lista", style="Muted.TLabel").pack(side="left", padx=(0, 10))
         self.gallery_playlist_var = tk.StringVar(value="Ninguna")
         self.gallery_playlist_combo = ttk.Combobox(
-            playlist_bar, textvariable=self.gallery_playlist_var, values=["Ninguna"], state="readonly", width=36
+            playlist_bar, textvariable=self.gallery_playlist_var, values=["Ninguna"], state="readonly", width=18
         )
         self.gallery_playlist_combo.pack(side="left")
         move_button = RoundedButton(playlist_bar, "≡", self.change_gallery_playlist, "Soft.TButton", width=42, height=34)
@@ -2521,9 +2543,8 @@ class App(tk.Tk):
         ToolTip(move_button, "Cambiar la lista del vídeo seleccionado")
         self.gallery_action_widgets.extend([self.gallery_playlist_combo, move_button])
 
-        privacy_bar = ttk.Frame(self.gallery_tab)
-        privacy_bar.pack(fill="x", pady=(0, 8))
-        ttk.Label(privacy_bar, text="Cambiar privacidad", style="Muted.TLabel").pack(side="left", padx=(0, 10))
+        privacy_bar = playlist_bar
+        ttk.Label(privacy_bar, text="Privacidad", style="Muted.TLabel").pack(side="left", padx=(18, 8))
         self.gallery_privacy_var = tk.StringVar(value="Oculto")
         gallery_privacy_combo = ttk.Combobox(
             privacy_bar,
@@ -2552,7 +2573,7 @@ class App(tk.Tk):
         table_frame = ttk.Frame(self.gallery_tab)
         table_frame.pack(fill="both", expand=True)
         columns = ("titulo", "duracion", "privacidad", "listas", "fecha", "youtube")
-        self.gallery_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=17, selectmode="extended")
+        self.gallery_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=5, selectmode="extended")
         for key, label, width in [
             ("titulo", "Título", 330),
             ("duracion", "Duración", 90),
@@ -3082,7 +3103,7 @@ class App(tk.Tk):
         logo = resource_path("assets/youtube-sync-logo.png")
         if Image and ImageTk and logo.exists():
             image = Image.open(logo)
-            image.thumbnail((72, 72))
+            image.thumbnail((52, 52))
             self.logo_image = ImageTk.PhotoImage(image)
             self.logo_label.configure(image=self.logo_image)
 
@@ -3702,7 +3723,7 @@ class App(tk.Tk):
         used = self.store.daily_upload_attempt_count()
         active = payload.get("active", 0)
         self.total_count_var.set(str(payload["total"]))
-        self.pending_count_var.set(str(payload["pending"] + active + payload["other"]))
+        self.pending_count_var.set(str(payload["pending"]))
         self.active_count_var.set(str(active))
         self.uploaded_count_var.set(str(payload["uploaded"]))
         self.issue_count_var.set(str(payload["other"]))
@@ -3763,7 +3784,7 @@ class App(tk.Tk):
     def update_incident_help(self, _event=None) -> None:
         incident = self.selected_incident()
         if not incident:
-            self.incident_help_var.set("Selecciona un video para ver su estado y las acciones disponibles.")
+            self.incident_help_var.set("")
             return
         status = incident["status"]
         detail = incident["detail"].lower()
