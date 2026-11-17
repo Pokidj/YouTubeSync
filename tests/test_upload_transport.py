@@ -47,6 +47,7 @@ class UploadTransportTests(unittest.TestCase):
             path.write_bytes(b"test-video")
             store = Mock()
             store.has_success.return_value = False
+            store.upload_identity.return_value = ("Video", "remote-id")
             store.upload_status.return_value = "error"
             client = Mock()
             client.verify_local_file.return_value = (True, "remote-id", "fingerprint", "processing")
@@ -62,6 +63,7 @@ class UploadTransportTests(unittest.TestCase):
             path.write_bytes(b"test-video")
             store = Mock()
             store.has_success.return_value = False
+            store.upload_identity.return_value = ("", "")
             client = Mock()
             client.verify_local_file.return_value = (False, "", "missing", "missing")
             client.upload.side_effect = engine.UploadCancelled("Cancelado")

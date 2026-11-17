@@ -5,6 +5,26 @@ asignarles una nueva version. La version mostrada por la app sigue siendo 1.0.
 
 ## Sin publicar
 
+### Verificacion de contenido y recuperacion de estados
+
+- Normalizado el resultado remoto `succeeded` como procesamiento terminado; se
+  corrigen los videos finalizados que seguian apareciendo En curso.
+- Comprobacion de estados al abrir, al actualizar y cada minuto incluso con Auto
+  OFF. Las comprobaciones periodicas consultan IDs en lotes de 50, en segundo plano.
+- Reintentar conserva la seleccion y el ID remoto aunque se recargue la tabla.
+- El modo automatico configurado al arrancar inicia realmente el trabajador.
+- Las nuevas subidas incluyen SHA-256 del archivo completo, calculado en bloques
+  y cacheado mientras el archivo no cambie. No se identifica contenido por duracion.
+- Las huellas antiguas requieren tambien nombre original y tamano coincidentes.
+  Sin pruebas suficientes queda una incidencia, no un falso Subido ni un borrado.
+- Se elimina la asociacion por ruta si la firma del archivo local ha cambiado.
+- Conciliacion atomica que no sobrescribe reintentos o nuevas subidas posteriores
+  a la consulta; los fallos de red no se interpretan como videos ausentes.
+- Los estados de error muestran su motivo al pasar el cursor; En curso tiene su
+  propio contador y no se contabiliza como incidencia.
+- Pruebas de procesamiento, conciliacion por ID, reintento, falsos positivos de
+  metadatos iguales y diferencias fuera de los segmentos de la huella antigua.
+
 ### Subidas por bloques y procesamiento
 
 - Transporte HTTP creado con la configuracion oficial de Google: un `308 Resume

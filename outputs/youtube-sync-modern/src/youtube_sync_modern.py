@@ -607,6 +607,9 @@ class MainWindow(QMainWindow):
         self.folder_refresh_timer = QTimer(self)
         self.folder_refresh_timer.setSingleShot(True)
         self.folder_refresh_timer.timeout.connect(self.refresh_folder)
+        self.verification_timer = QTimer(self)
+        self.verification_timer.timeout.connect(lambda: self.check_youtube(full=False))
+        self.verification_timer.start(60000)
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(QIcon(str(asset_path("youtube-sync.ico"))))
@@ -1106,14 +1109,18 @@ class MainWindow(QMainWindow):
             self.tray_auto_action.setText("Auto ON" if self.auto_enabled else "Auto OFF")
             self.tray_auto_action.setIcon(self.symbol_icon(0x25CF, "#22c55e" if self.auto_enabled else "#ef4444"))
 
-    def start_worker(self) -> None:
+    def start_worker(self, manual_path: Path | None = None) -> None:
         if self.worker and self.worker.is_alive():
+            if manual_path is not None:
+                self.worker.upload_path(manual_path)
             self.worker.set_enabled(self.auto_enabled)
             self.worker.refresh()
             return
         self.worker = engine.SyncWorker(self.store, lambda: self.config, self.events)
-        self.worker.start()
+        if manual_path is not None:
+            self.worker.upload_path(manual_path)
         self.worker.set_enabled(self.auto_enabled)
+        self.worker.start()
 
     def toggle_auto(self) -> None:
         self.auto_enabled = not self.auto_enabled
@@ -1174,8 +1181,8 @@ class MainWindow(QMainWindow):
                     paths.append((path.stat().st_ctime, path))
             except OSError:
                 continue
-        registry_by_signature, registry_by_path = self.store.registry_index()
-        statuses_by_signature, statuses_by_path = self.store.upload_status_index()
+        registry_by_signature, _ = self.store.registry_index()
+        statuses_by_signature, _ = self.store.upload_status_index()
         counts = {"Pendiente": 0, "Subido": 0, "Incidencia": 0, "En curso": 0}
         for _, path in sorted(paths, key=lambda item: item[0]):
             try:
@@ -1185,8 +1192,8 @@ class MainWindow(QMainWindow):
                 created = engine.datetime.fromtimestamp(path.stat().st_ctime).strftime("%Y-%m-%d %H:%M:%S")
             except OSError:
                 continue
-            registry_row = registry_by_signature.get(signature) or registry_by_path.get(str(path))
-            status_row = statuses_by_signature.get(signature) or statuses_by_path.get(str(path))
+            registry_row = registry_by_signature.get(signature)
+            status_row = statuses_by_signature.get(signature)
             if registry_row and registry_row[3] and registry_row[4] in {"uploaded", "youtube_title_exists"}:
                 status = "Subido"
             elif registry_row and registry_row[3] and registry_row[4] == "processing":
@@ -1209,6 +1216,8 @@ class MainWindow(QMainWindow):
             }
             for column, value in enumerate(values):
                 self.video_table.setItem(row, column, table_item(value, status_colors.get(status, "") if column == 4 else ""))
+            if status_row and status_row[4]:
+                self.video_table.item(row, 4).setToolTip(status_row[4])
             self.video_rows[row] = {
                 "path": str(path),
                 "signature": signature,
@@ -1218,7 +1227,7 @@ class MainWindow(QMainWindow):
             }
         self.video_table.setSortingEnabled(True)
         self.video_summary.setText(
-            f"Total {len(paths)} / Pendientes {counts['Pendiente']} / Subidos {counts['Subido']} / Incidencias {counts['Incidencia']}"
+            f"Total {len(paths)} / Pendientes {counts['Pendiente']} / En curso {counts['En curso']} / Subidos {counts['Subido']} / Incidencias {counts['Incidencia']}"
         )
         self.state_card.set("Preparado", f"{len(paths)} videos en la carpeta")
 
@@ -1245,6 +1254,9 @@ class MainWindow(QMainWindow):
         item = self.selected_video_row()
         if not item:
             return
+        self.queue_video(item)
+
+    def queue_video(self, item: dict) -> None:
         path = Path(item["path"])
         if not path.exists():
             QMessageBox.warning(self, APP_NAME, "El archivo seleccionado ya no existe.")
@@ -1253,9 +1265,7 @@ class MainWindow(QMainWindow):
         if item["status"] == "Subido":
             QMessageBox.information(self, APP_NAME, "Este video ya aparece como subido en el registro.")
             return
-        self.start_worker()
-        if self.worker:
-            self.worker.upload_path(path)
+        self.start_worker(manual_path=path)
         self.upload_card.set("En cola", path.name)
         self.log(f"Subida manual solicitada para {path.name}.")
 
@@ -1263,10 +1273,13 @@ class MainWindow(QMainWindow):
         item = self.selected_video_row()
         if not item:
             return
+        if item["status"] == "Subido":
+            self.queue_video(item)
+            return
         if item["signature"]:
             self.store.clear_upload_incident(item["signature"])
         self.refresh_folder()
-        self.upload_selected_video()
+        self.queue_video(item)
 
     def open_selected_local_video(self) -> None:
         item = self.selected_video_row()
@@ -1340,19 +1353,27 @@ class MainWindow(QMainWindow):
                 errors.append(f"{path.name}: {engine.describe_error(exc)}")
         self.events.put(("local_delete_result", {"deleted": deleted, "errors": errors}))
 
-    def check_youtube(self) -> None:
+    def check_youtube(self, full: bool = True) -> None:
         if self.youtube_check_running:
             return
         if not self.config.client_secret_path or not Path(self.config.client_secret_path).exists():
             self.state_card.set("Sin OAuth", "Configura el JSON de YouTube.")
             return
         self.youtube_check_running = True
-        threading.Thread(target=self._check_youtube_thread, daemon=True).start()
+        self.status.setText("Comprobando videos con YouTube...")
+        threading.Thread(target=self._check_youtube_thread, args=(full,), daemon=True).start()
 
-    def _check_youtube_thread(self) -> None:
+    def _check_youtube_thread(self, full: bool = True) -> None:
         try:
             client = engine.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
             info = client.channel_info()
+            changed = engine.reconcile_local_uploads(
+                self.store, self.config, client, full=full,
+                is_active=lambda path: bool(self.worker and self.worker.active_path == path),
+            )
+            if changed:
+                self.events.put(("folder_refresh", False))
+                self.events.put(("log", f"Comprobacion de YouTube: {changed} estado(s) actualizado(s)."))
             self.events.put(("youtube", info))
         except Exception as exc:
             self.events.put(("youtube_error", engine.describe_error(exc)))
@@ -1792,6 +1813,7 @@ class MainWindow(QMainWindow):
                 self.status.setText("Trabajando..." if value else "Preparado")
             elif kind == "upload_completed":
                 self.folder_refresh_timer.start(0)
+                self.check_youtube(full=False)
             elif kind == "folder_refresh":
                 self.folder_refresh_timer.start(150)
             elif kind == "upload_limited":
@@ -1801,9 +1823,11 @@ class MainWindow(QMainWindow):
             elif kind == "youtube":
                 self.youtube_check_running = False
                 self.state_card.set("Conectado", value.get("title", "Canal conectado"))
+                self.status.setText("Videos comprobados con YouTube")
             elif kind == "youtube_error":
                 self.youtube_check_running = False
                 self.state_card.set("Sin conexion", value)
+                self.log(f"No se pudieron actualizar los estados: {value}")
             elif kind == "channel_shared":
                 value["privacy"] = "unlisted"
                 url = f"https://youtu.be/{value['id']}"
@@ -2074,6 +2098,9 @@ def main() -> None:
         return
     window = MainWindow()
     window.show()
+    window.check_youtube()
+    if window.auto_enabled:
+        window.start_worker()
     sys.exit(app.exec())
 
 

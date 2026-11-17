@@ -135,3 +135,22 @@ gestionar el cierre y la sustitucion del ejecutable y preservar los datos del us
 - Manten las operaciones de YouTube fuera del hilo de la interfaz.
 - Distingue registro local, transferencia y procesamiento remoto en estados y mensajes.
 - Documenta cambios de comportamiento y limitaciones comprobadas en el changelog.
+
+## Identidad y conciliacion
+
+`remote_video_state` normaliza `uploadStatus` y `processingStatus`; recibir el
+archivo no equivale a procesarlo. `reconcile_local_uploads` actualiza el registro
+sin iniciar subidas ni borrar archivos y omite la transferencia activa. Un fallo
+de red no se interpreta como ausencia del video. La interfaz ejecuta este trabajo
+fuera del hilo Qt, incluso cuando Auto esta desactivado.
+
+Las nuevas subidas escriben `YouTubeSync-Fingerprint: sha256:<huella>` en la
+descripcion. Es una huella calculada por la app antes de transferir, no un checksum
+independiente proporcionado por YouTube. Los marcadores antiguos son muestreados:
+se contrastan tambien con nombre original y tamano. Titulo, fecha y duracion
+iguales nunca bastan para confirmar una correspondencia. Un video sin evidencia
+suficiente requiere revision en Canal; no se confirma ni se borra automaticamente.
+
+La conciliacion completa se hace al abrir o actualizar. La periodica consulta solo
+IDs pendientes de resolver en lotes de 50. Las huellas se calculan en bloques y se
+cachean por ruta, tamano y marcas de tiempo para no releer clips sin cambios.

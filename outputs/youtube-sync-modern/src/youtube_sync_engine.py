@@ -246,12 +246,12 @@ def file_signature(path: Path) -> str:
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
 
 
-_fingerprint_cache: dict[tuple[str, int, int], str] = {}
+_fingerprint_cache: dict[tuple, str] = {}
 
 
 def file_content_fingerprint(path: Path) -> str:
     stat = path.stat()
-    key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+    key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
     cached = _fingerprint_cache.get(key)
     if cached:
         return cached
@@ -264,11 +264,50 @@ def file_content_fingerprint(path: Path) -> str:
             source.seek(offset)
             digest.update(offset.to_bytes(8, "big"))
             digest.update(source.read(sample_size))
+    after = path.stat()
+    if (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+        raise OSError("El archivo ha cambiado durante la comprobacion")
     value = digest.hexdigest()
     if len(_fingerprint_cache) >= 1000:
         _fingerprint_cache.clear()
     _fingerprint_cache[key] = value
     return value
+
+
+_full_fingerprint_cache: dict[tuple, str] = {}
+
+
+def full_content_fingerprint(path: Path) -> str:
+    before = path.stat()
+    key = (str(path.resolve()), before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+    if key in _full_fingerprint_cache:
+        return _full_fingerprint_cache[key]
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(4 * 1024 * 1024), b""):
+            digest.update(chunk)
+    after = path.stat()
+    if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+        raise OSError("El archivo ha cambiado durante la comprobacion")
+    value = "sha256:" + digest.hexdigest()
+    if len(_full_fingerprint_cache) >= 1000:
+        _full_fingerprint_cache.clear()
+    _full_fingerprint_cache[key] = value
+    return value
+
+
+def remote_video_state(item: dict) -> str:
+    upload = item.get("status", {}).get("uploadStatus", "")
+    processing = item.get("processingDetails", {}).get("processingStatus", "")
+    if upload in {"failed", "rejected", "deleted"}:
+        return upload
+    if processing in {"failed", "terminated"}:
+        return processing
+    if upload == "processed" or processing == "succeeded":
+        return "processed"
+    if upload == "uploaded" or processing == "processing":
+        return "processing"
+    return "unknown"
 
 
 def human_size(bytes_count: int) -> str:
@@ -569,7 +608,7 @@ class Store:
     def clear_upload_incident(self, signature: str) -> None:
         """Clear a transient upload state without touching the duplicate registry."""
         with self._connection() as db:
-            db.execute("DELETE FROM uploads WHERE signature = ?", (signature,))
+            db.execute("UPDATE uploads SET status = 'pending', error = '' WHERE signature = ?", (signature,))
 
     def upload_status(self, signature: str) -> str:
         with self._connection() as db:
@@ -665,6 +704,38 @@ class Store:
                 """,
                 (signature, str(path), title, youtube_id, status, size, stamp, stamp, error),
             )
+
+    def apply_reconciliation(self, signature: str, path: Path, title: str, youtube_id: str,
+                             status: str, reason: str, error: str,
+                             expected_registry: tuple | None, expected_status: tuple | None) -> bool:
+        stamp = datetime.now().isoformat(timespec="seconds")
+        size = path.stat().st_size
+        with self._connection() as db:
+            # Do not overwrite a retry or an upload that changed since the API snapshot.
+            db.execute("BEGIN IMMEDIATE")
+            current_registry = db.execute(
+                "SELECT signature, title, path, youtube_id, reason, updated_at FROM upload_registry WHERE signature = ?",
+                (signature,),
+            ).fetchone()
+            current_status = db.execute(
+                "SELECT signature, title, path, status, error, updated_at FROM uploads WHERE signature = ?",
+                (signature,),
+            ).fetchone()
+            if current_registry != expected_registry or current_status != expected_status:
+                return False
+            db.execute(
+                """INSERT INTO upload_registry(signature, title, path, youtube_id, reason, created_at, updated_at)
+                   VALUES(?,?,?,?,?,?,?) ON CONFLICT(signature) DO UPDATE SET
+                   youtube_id=excluded.youtube_id, reason=excluded.reason, updated_at=excluded.updated_at""",
+                (signature, title, str(path), youtube_id, reason, stamp, stamp),
+            )
+            db.execute(
+                """INSERT INTO uploads(signature, path, title, youtube_id, status, size, created_at, updated_at, error)
+                   VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(signature) DO UPDATE SET
+                   youtube_id=excluded.youtube_id, status=excluded.status, updated_at=excluded.updated_at, error=excluded.error""",
+                (signature, str(path), title, youtube_id, status, size, stamp, stamp, error),
+            )
+        return True
 
     def mark_local_deleted(self, signature: str) -> None:
         stamp = datetime.now().isoformat(timespec="seconds")
@@ -951,16 +1022,15 @@ class YouTubeClient:
         titles, _video_ids = self.uploaded_video_index(force=force)
         return titles
 
-    def uploaded_video_index(self, force: bool = False) -> tuple[set[str], set[str]]:
-        if self._known_titles is not None and self._known_video_ids is not None and not force:
+    def uploaded_video_index(self, force: bool = False, video_ids: list[str] | None = None) -> tuple[set[str], set[str]]:
+        if self._known_titles is not None and self._known_video_ids is not None and not force and video_ids is None:
             return self._known_titles, self._known_video_ids
 
         service = self.service()
         title_candidates: dict[str, list[str]] = {}
-        info = self.channel_info()
-        uploads = info["uploads"]
+        uploads = self.channel_info()["uploads"] if video_ids is None else ""
         page_token = None
-        while True:
+        while video_ids is None:
             response = service.playlistItems().list(
                 part="snippet",
                 playlistId=uploads,
@@ -979,7 +1049,8 @@ class YouTubeClient:
                 break
         video_states: dict[str, str] = {}
         video_metadata: dict[str, dict] = {}
-        all_video_ids = list(dict.fromkeys(video_id for values in title_candidates.values() for video_id in values))
+        all_video_ids = list(dict.fromkeys(video_ids if video_ids is not None else
+                                         (video_id for values in title_candidates.values() for video_id in values)))
         for offset in range(0, len(all_video_ids), 50):
             batch = all_video_ids[offset : offset + 50]
             response = service.videos().list(
@@ -989,14 +1060,12 @@ class YouTubeClient:
             ).execute()
             for item in response.get("items", []):
                 video_id = item.get("id", "")
-                upload_status = item.get("status", {}).get("uploadStatus", "")
-                processing_status = item.get("processingDetails", {}).get("processingStatus", "")
-                state = upload_status or processing_status or "unknown"
-                if upload_status == "uploaded" and processing_status:
-                    state = processing_status
+                state = remote_video_state(item)
                 if video_id:
                     video_states[video_id] = state
                     snippet = item.get("snippet", {})
+                    if snippet.get("title") and video_id not in title_candidates.get(snippet["title"], []):
+                        title_candidates.setdefault(snippet["title"], []).append(video_id)
                     file_details = item.get("fileDetails", {})
                     description = snippet.get("description", "") or ""
                     marker = ""
@@ -1066,23 +1135,38 @@ class YouTubeClient:
             return False, "", "el video no aparece en el canal", "missing"
         local_size = path.stat().st_size
         local_name = path.name.casefold()
-        local_fingerprint = ""
+        local_fingerprints = {}
         mismatch_reasons = []
+        uncertain = []
+        candidates.sort(key=lambda candidate: ((self._known_video_states or {}).get(candidate) != "processed", candidate != youtube_id))
         for candidate in candidates:
             state = (self._known_video_states or {}).get(candidate, "missing")
             metadata = (self._known_video_metadata or {}).get(candidate, {})
             marker = metadata.get("fingerprint", "")
             if marker:
-                if not local_fingerprint:
-                    local_fingerprint = file_content_fingerprint(path)
-                if marker == local_fingerprint:
+                algorithm = "full" if marker.startswith("sha256:") else "legacy"
+                if algorithm not in local_fingerprints:
+                    local_fingerprints[algorithm] = full_content_fingerprint(path) if algorithm == "full" else file_content_fingerprint(path)
+                if marker == local_fingerprints[algorithm]:
+                    remote_size = int(metadata.get("size", 0) or 0)
+                    if remote_size and remote_size != local_size:
+                        mismatch_reasons.append(f"{candidate}: huella declarada coincidente pero tamaño recibido distinto")
+                        continue
+                    if algorithm == "legacy":
+                        remote_name = str(metadata.get("filename", "")).casefold()
+                        if not remote_size or not remote_name:
+                            uncertain.append(candidate)
+                            continue
+                        if remote_name != local_name:
+                            mismatch_reasons.append(f"{candidate}: nombre original distinto")
+                            continue
                     return True, candidate, "huella de contenido confirmada", state
                 mismatch_reasons.append(f"{candidate}: la huella de contenido no coincide")
                 continue
             remote_size = int(metadata.get("size", 0) or 0)
             remote_name = str(metadata.get("filename", "")).casefold()
-            if remote_size and remote_name and remote_size == local_size and remote_name == local_name:
-                return True, candidate, "nombre original y tamaño confirmados", state
+            if (not remote_size or remote_size == local_size) and (not remote_name or remote_name == local_name):
+                uncertain.append(candidate)
             reasons = []
             if remote_size and remote_size != local_size:
                 reasons.append("tamaño distinto")
@@ -1091,6 +1175,8 @@ class YouTubeClient:
             if not remote_size or not remote_name:
                 reasons.append("faltan metadatos para confirmar el contenido")
             mismatch_reasons.append(f"{candidate}: {', '.join(reasons)}")
+        if uncertain:
+            return False, uncertain[0], "No hay datos suficientes para confirmar el contenido; revisa el video en Canal", "unverified"
         first = candidates[0]
         state = (self._known_video_states or {}).get(first, "missing")
         return False, first, "; ".join(mismatch_reasons[:3]), state
@@ -1107,7 +1193,7 @@ class YouTubeClient:
         return False, "", "el video no aparece en el canal"
 
     def upload(self, path: Path, title: str, cancel_event: threading.Event, progress: Callable[[int, str], None]) -> str:
-        fingerprint = file_content_fingerprint(path)
+        fingerprint = full_content_fingerprint(path)
         body = {
             "snippet": {
                 "title": title,
@@ -1172,6 +1258,72 @@ class YouTubeClient:
         self.log(f"Anadido a la lista: {self.config.playlist_name or self.config.playlist_id}")
 
 
+def reconcile_local_uploads(store: Store, config: Config, client: YouTubeClient,
+                            full: bool = False, is_active: Callable[[Path], bool] | None = None) -> int:
+    """Reconcile persisted identities without uploading or deleting any video."""
+    if not config.watch_folder:
+        return 0
+    folder = Path(config.watch_folder).resolve()
+    registry, _ = store.registry_index()
+    statuses, _ = store.upload_status_index()
+    candidates = {}
+    for signature, row in {**registry, **statuses}.items():
+        path = Path(row[2]).resolve()
+        if not path.is_relative_to(folder) or (not config.recursive and path.parent != folder):
+            continue
+        record = registry.get(signature)
+        status = statuses.get(signature)
+        video_id = record[3] if record else ""
+        if not video_id:
+            _title, video_id = store.upload_identity(signature)
+        if full or (record and record[4] == "processing") or (status and status[3] in {"uploading", "processing", "error", "cancelled"}):
+            candidates[signature] = (path, record[1] if record else row[1], video_id)
+    if not candidates:
+        return 0
+    if full:
+        client.uploaded_video_index(force=True)
+    else:
+        client.uploaded_video_index(video_ids=list({item[2] for item in candidates.values() if item[2]}))
+    changed = 0
+    for signature, (path, title, video_id) in candidates.items():
+        if is_active and is_active(path):
+            continue
+        try:
+            if not path.is_file() or file_signature(path) != signature:
+                continue
+            # An ID-less failed attempt needs the full channel scan before retrying.
+            if not full and not video_id:
+                if statuses.get(signature, (None,) * 4)[3] != "uploading":
+                    continue
+                confirmed, resolved_id, reason, state = False, "", "Subida interrumpida; puedes reintentar", "missing"
+            else:
+                confirmed, resolved_id, reason, state = client.verify_local_file(path, title, video_id)
+            if is_active and is_active(path):
+                continue
+            if file_signature(path) != signature:
+                continue
+            if confirmed and state == "processed":
+                new_status, registry_reason, error = "uploaded", "uploaded", ""
+            elif confirmed and state == "processing":
+                new_status, registry_reason, error = "processing", "processing", ""
+            elif state == "missing":
+                new_status, registry_reason, error = "pending", "remote_missing", reason
+            else:
+                new_status, registry_reason = "error", "unverified"
+                error = reason if not confirmed else f"YouTube indica {state}. Revisa el video en Canal antes de reintentar."
+            previous = statuses.get(signature)
+            record = registry.get(signature)
+            if (previous and previous[3] == new_status and previous[4] == error
+                    and record and record[3] == resolved_id and record[4] == registry_reason):
+                continue
+            if store.apply_reconciliation(signature, path, title, resolved_id or video_id,
+                                          new_status, registry_reason, error, record, previous):
+                changed += 1
+        except OSError as exc:
+            client.log(f"No se pudo comprobar {path.name}: {describe_error(exc)}")
+    return changed
+
+
 class SyncWorker(threading.Thread):
     def __init__(self, store: Store, get_config: Callable[[], Config], events: queue.Queue) -> None:
         super().__init__(daemon=True)
@@ -1184,6 +1336,7 @@ class SyncWorker(threading.Thread):
         self.enabled_event = threading.Event()
         self.manual_uploads: queue.Queue[Path] = queue.Queue()
         self.last_cleanup_warning_key = ""
+        self.active_path: Path | None = None
 
     def log(self, text: str) -> None:
         self.events.put(("log", f"[{now_text()}] {text}"))
@@ -1311,7 +1464,11 @@ class SyncWorker(threading.Thread):
         for path in pending:
             if self.stop_event.is_set() or self.cancel_upload_event.is_set():
                 return
-            self.handle_file(path, client)
+            self.active_path = path
+            try:
+                self.handle_file(path, client)
+            finally:
+                self.active_path = None
 
     def auto_cleanup_once(self) -> None:
         config = self.get_config()
@@ -1415,7 +1572,14 @@ class SyncWorker(threading.Thread):
         if self.store.has_success(signature):
             self.log(f"Omitido {path.name}: ya esta en el registro permanente.")
             return
-        content_matches, youtube_id, match_reason, remote_state = client.verify_local_file(path, title)
+        saved_title, saved_id = self.store.upload_identity(signature)
+        content_matches, youtube_id, match_reason, remote_state = client.verify_local_file(path, saved_title or title, saved_id)
+        if remote_state == "unverified" or (content_matches and remote_state == "unknown"):
+            self.store.update_registry_state(signature, youtube_id, "unverified")
+            self.store.upsert(signature, path, title, "error", youtube_id=youtube_id, error=match_reason)
+            self.log(f"No se sube ni se borra {path.name}: {match_reason}.")
+            self.events.put(("folder_refresh", False))
+            return
         if remote_state == "processed" and content_matches:
             self.store.upsert(signature, path, title, "uploaded", youtube_id=youtube_id)
             self.store.remember_upload(signature, path, title, youtube_id=youtube_id, reason="youtube_title_exists")

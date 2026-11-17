@@ -114,6 +114,25 @@ class ResponsiveLayoutTests(unittest.TestCase):
         self.assertIs(self.window.settings_dialog, first)
         first.close()
 
+    def test_retry_queues_the_original_selection_after_refresh(self):
+        item = {"path": "C:/example/video.mp4", "signature": "signature", "status": "Incidencia"}
+        with patch.object(self.window, "selected_video_row", side_effect=[item, None]) as selected, \
+                patch.object(self.window, "refresh_folder"), \
+                patch.object(self.window, "queue_video") as queue_video:
+            self.window.retry_selected_video()
+        selected.assert_called_once()
+        queue_video.assert_called_once_with(item)
+        self.window.store.clear_upload_incident.assert_called_once_with("signature")
+
+    def test_selected_video_is_queued_before_a_new_worker_starts(self):
+        worker = Mock()
+        self.window.worker = None
+        with patch.object(ui.engine, "SyncWorker", return_value=worker):
+            self.window.start_worker(manual_path=Path("selected.mp4"))
+        self.assertEqual(worker.method_calls[0], unittest.mock.call.upload_path(Path("selected.mp4")))
+        self.assertEqual(worker.method_calls[-1], unittest.mock.call.start())
+        self.window.worker = None
+
 
 if __name__ == "__main__":
     unittest.main()
