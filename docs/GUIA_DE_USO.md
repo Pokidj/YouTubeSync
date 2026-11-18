@@ -148,6 +148,36 @@ se guardan bajo `%APPDATA%\YouTubeSync`.
 
 ## Problemas habituales
 
+El [protocolo de verificacion](VERIFICACION_DE_SUBIDAS.md) explica por que un
+archivo que sigue en la carpeta no se vuelve a subir, que recuerda la app sin
+API y que comprobaciones adicionales son obligatorias antes de borrarlo.
+
+### Cuota de la API agotada
+
+No es un fallo de los archivos. YouTubeSync conserva los Subidos ya confirmados
+y deja En espera los intentos bloqueados por cuota. La cuenta atras indica la
+proxima comprobacion prevista; no garantiza que Google conceda cuota nueva.
+Si Auto sigue ON, los intentos se reanudan al terminar la pausa. OFF sigue OFF.
+
+Actualizar ofrece Ver cuota, Solicitar ampliacion y Reintentar conexion. Esta
+ultima opcion solo vuelve a consultar Google: no reinicia ni aumenta la cuota.
+Google permite solicitar ampliaciones mediante su
+[formulario de auditoria y ampliacion](https://support.google.com/youtube/contact/yt_api_form).
+
+La cuota diaria se reinicia a medianoche del Pacifico. Normalmente corresponde
+a las 09:00 en Espana peninsular; durante el desfase entre cambios de horario
+de Estados Unidos y Europa puede ser a las 08:00. La app calcula el instante
+del proximo reinicio, no una espera fija de 24 horas.
+[Referencia oficial de cuotas](https://developers.google.com/youtube/data/determine_quota_cost).
+
+Sin API puedes ver la biblioteca local, abrir enlaces en el navegador y, si
+ya se cargo correctamente el canal con esta version, consultar su ultima copia
+guardada. Se muestra la fecha de esa copia. No es una verificacion actual del
+canal, especialmente para videos privados, y no se usa para autorizar borrados.
+YouTube Studio permite revisar manualmente el canal con tu cuenta autorizada.
+
+### Otros problemas
+
 | Problema | Que hacer |
 | --- | --- |
 | No detecta un archivo | Revisa carpeta, extension y subcarpetas; pulsa Actualizar carpeta. Un archivo reciente debe cumplir la espera de estabilidad. |

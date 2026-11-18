@@ -15,6 +15,7 @@ engine = ui.engine
 class UploadTransportTests(unittest.TestCase):
     def test_308_without_location_continues_to_next_chunk(self):
         store = Mock()
+        store.api_pause.return_value = None
         store.token_path_for.return_value = Path("test-token-not-read")
         client = engine.YouTubeClient(store, engine.Config(), Mock())
         with patch.object(client, "_authorize", return_value=Mock()), patch.object(engine, "build") as build:

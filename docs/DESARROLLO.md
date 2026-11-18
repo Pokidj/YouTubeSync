@@ -154,3 +154,21 @@ suficiente requiere revision en Canal; no se confirma ni se borra automaticament
 La conciliacion completa se hace al abrir o actualizar. La periodica consulta solo
 IDs pendientes de resolver en lotes de 50. Las huellas se calculan en bloques y se
 cachean por ruta, tamano y marcas de tiempo para no releer clips sin cambios.
+
+## Gestion de cuota
+
+`QuotaAwareHttp` envuelve el transporte autorizado, conservando su manejo de
+HTTP 308. Ante cuota agotada guarda una pausa en `service_cache`, compartida
+entre clientes y persistente al reiniciar. La cuota especifica Video Uploads
+solo bloquea transferencias; `uploadLimitExceeded` sigue siendo un limite del
+canal, no del presupuesto general de lectura. El transporte nunca desactiva SSL.
+
+El trabajador reutiliza sus clientes. Separa el catalogo completo (TTL de cinco
+minutos) del indice por IDs conocidos (TTL de un minuto). Los nuevos IDs no se
+ocultan con una copia anterior del catalogo. Una lectura fallida no altera
+confirmaciones anteriores. `waiting_quota` es una espera, no un error del archivo.
+
+La galeria guarda una copia solo tras completar la carga correctamente y la
+identifica con fecha al usarla sin cuota. Nunca se usa esta copia para confirmar
+la presencia actual de un video ni para permitir borrados. La comprobacion de
+cuotas cuenta hasta el proximo intento previsto, no afirma cuota restante real.

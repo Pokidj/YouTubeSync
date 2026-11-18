@@ -19,6 +19,7 @@ class OAuthTests(unittest.TestCase):
         self.secret = self.folder / "client.json"
         self.secret.write_text("{}", encoding="utf-8")
         self.store = Mock()
+        self.store.api_pause.return_value = None
         self.store.token_path_for.return_value = self.token
         self.config = engine.Config(client_secret_path=str(self.secret))
         self.creds = Mock(valid=True, expired=False, refresh_token="test-only")

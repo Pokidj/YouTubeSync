@@ -28,7 +28,6 @@ class ReconciliationTests(unittest.TestCase):
         self.client._known_video_states = states
         self.client._known_video_metadata = metadata
         self.client._known_title_candidates = candidates or {"Video": list(states)}
-        self.client._known_all_title_ids = {"Video": next(iter(states), "")}
 
     def remember_processing(self):
         self.store.remember_upload(self.signature, self.path, "Video", "remote-id", "processing")
@@ -44,10 +43,11 @@ class ReconciliationTests(unittest.TestCase):
     def test_id_batches_do_not_load_the_entire_channel(self):
         service = Mock()
         service.videos.return_value.list.return_value.execute.return_value = {"items": [
-            {"id": "remote-id", "snippet": {"title": "Video"}, "status": {"uploadStatus": "uploaded"},
+            {"id": "remote-id", "snippet": {"title": "Video", "channelId": "owner"}, "status": {"uploadStatus": "uploaded"},
              "processingDetails": {"processingStatus": "succeeded"}},
         ]}
-        with patch.object(self.client, "service", return_value=service):
+        with patch.object(self.client, "service", return_value=service), \
+                patch.object(self.client, "channel_info", return_value={"id": "owner"}):
             titles, ids = self.client.uploaded_video_index(video_ids=[str(i) for i in range(101)])
         service.channels.assert_not_called()
         service.playlistItems.assert_not_called()
@@ -104,7 +104,7 @@ class ReconciliationTests(unittest.TestCase):
         with patch.object(self.client, "uploaded_video_index"):
             engine.reconcile_local_uploads(self.store, self.config, self.client)
         self.assertFalse(self.store.has_success(self.signature))
-        self.assertEqual(self.store.upload_status(self.signature), "error")
+        self.assertEqual(self.store.upload_status(self.signature), "verification_pending")
         with patch.object(self.client, "upload") as upload, patch.object(self.client, "delete_video") as delete:
             engine.SyncWorker(self.store, lambda: self.config, queue.Queue()).handle_file(self.path, self.client)
         upload.assert_not_called()

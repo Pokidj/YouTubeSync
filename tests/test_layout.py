@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -25,6 +26,7 @@ class ResponsiveLayoutTests(unittest.TestCase):
 
     def setUp(self):
         store = Mock()
+        store.api_pause.return_value = None
         store.load_config.return_value = ui.engine.Config()
         with patch.object(ui.engine, "Store", return_value=store), \
                 patch.object(ui.MainWindow, "build_tray"), \
@@ -132,6 +134,47 @@ class ResponsiveLayoutTests(unittest.TestCase):
         self.assertEqual(worker.method_calls[0], unittest.mock.call.upload_path(Path("selected.mp4")))
         self.assertEqual(worker.method_calls[-1], unittest.mock.call.start())
         self.window.worker = None
+
+    def test_quota_waiting_is_not_an_incident_and_keeps_confirmed_uploads(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
+            registry, statuses = {}, {}
+            for name, status, error in (("confirmed", "error", "quotaExceeded"),
+                                        ("waiting", "error", "quotaExceeded"),
+                                        ("broken", "error", "Archivo corrupto")):
+                path = Path(temporary) / (name + ".mp4")
+                path.write_bytes(name.encode())
+                signature = ui.engine.file_signature(path)
+                statuses[signature] = (signature, name, str(path), status, error, "2026-11-17")
+                if name == "confirmed":
+                    registry[signature] = (signature, name, str(path), "remote-id", "uploaded", "2026-11-17")
+            self.window.config = ui.engine.Config(watch_folder=temporary)
+            self.window.store.registry_index.return_value = (registry, {})
+            self.window.store.upload_status_index.return_value = (statuses, {})
+            self.window.refresh_folder()
+            states = {Path(row["path"]).stem: row["status"] for row in self.window.video_rows.values()}
+            self.assertEqual(states, {"confirmed": "Subido", "waiting": "En espera", "broken": "Incidencia"})
+
+    def test_quota_countdown_retries_only_once_when_expired(self):
+        self.window.api_pause_state = {"retry_at": "2000-01-01T00:00:00+00:00"}
+        with patch.object(self.window, "check_youtube") as check:
+            self.window.update_quota_status()
+            self.window.update_quota_status()
+        check.assert_called_once_with(full=True)
+
+    def test_local_actions_receive_the_persisted_youtube_id(self):
+        self.window.video_table.setRowCount(1)
+        for column, text in ((0, "file.mp4"), (1, "Video"), (4, "Subido"), (5, "C:/file.mp4")):
+            self.window.video_table.setItem(0, column, ui.table_item(text))
+        self.window.video_rows[0] = {"path": "C:/file.mp4", "signature": "signature", "youtube_id": "remote-id"}
+        self.window.video_table.selectRow(0)
+        self.assertEqual(self.window.selected_video_row()["youtube_id"], "remote-id")
+
+    def test_thumbnail_downloads_use_a_fixed_pool_not_one_thread_per_video(self):
+        with patch.object(ui.threading, "Thread") as thread:
+            for number in range(100):
+                self.window.fetch_thumbnail({"id": str(number), "thumbnail": "https://example.invalid/image.jpg"})
+        self.assertEqual(thread.call_count, 6)
+        self.assertEqual(self.window.thumbnail_jobs.qsize(), 100)
 
 
 if __name__ == "__main__":

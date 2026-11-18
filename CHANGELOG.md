@@ -5,6 +5,48 @@ asignarles una nueva version. La version mostrada por la app sigue siendo 1.0.
 
 ## Sin publicar
 
+### Revision de persistencia y seguridad
+
+- Recibo persistente de cada nueva transferencia completada: ID devuelto por
+  YouTube, firma del archivo, huella completa, tamano y fecha, guardados con el
+  estado Procesando en una transaccion. No depende de conservar la descripcion.
+- Un archivo ya confirmado y sin cambios sigue reconocido aunque permanezca
+  en la carpeta, se reinicie la app o se limpie Consola; no se vuelve a subir.
+- Los registros sin evidencia suficiente se muestran Por verificar, no como
+  archivos defectuosos. No se inventan recibos para las subidas antiguas.
+- Consultas por ID verifican pertenencia al canal conectado. Eliminados los
+  metodos antiguos sin uso que confirmaban videos solo por titulo.
+- Borrado manual recibe el ID persistente de la seleccion; los errores locales
+  posteriores no eliminan el ID remoto guardado.
+- Cierre explicito del archivo de transferencia en exito, fallo y cancelacion;
+  una modificacion durante la transferencia impide confirmar esa correspondencia.
+- Miniaturas con seis trabajadores como maximo; el cierre definitivo detiene
+  vigilancia y temporizadores sin lanzar trabajo adicional.
+- Guardado atomico y validacion de ajustes; reparado el inicio minimizado y el
+  comando de inicio con Windows cuando se ejecuta desde el codigo fuente.
+- Explicacion del protocolo en `docs/VERIFICACION_DE_SUBIDAS.md` y pruebas de
+  persistencia, contenido, canal, cancelaciones, cambios y seleccion para borrado.
+
+### Cuota API y consulta local
+
+- La cuota agotada es una pausa global, no una incidencia de cada archivo. Se
+  conservan los estados previamente confirmados; los intentos bloqueados figuran
+  En espera y muestran el proximo intento con cuenta atras.
+- Bloqueo compartido y persistente de peticiones hasta el reinicio previsto de
+  Google o Retry-After, sin volver a consumir peticiones fallidas en cada ciclo.
+- Separadas las cuotas especificas de subidas y las restricciones del canal de
+  la cuota general de lectura. La pausa API no desactiva la intencion Auto ON.
+- Reutilizacion del cliente del trabajador; catalogo completo cacheado cinco
+  minutos y consultas por ID durante un minuto. Los videos con ID no requieren
+  recorrer todo el canal. La limpieza automatica se revisa como maximo cada cinco minutos.
+- Copia persistente de la ultima galeria cargada correctamente para consultarla
+  sin cuota, identificada como copia local con fecha. No confirma disponibilidad
+  actual ni autoriza borrados sin una nueva comprobacion remota.
+- Actualizar permite abrir las cuotas de Google, solicitar ampliacion o volver
+  a probar si ya se ha concedido. Reintentar no reinicia el contador de Google.
+- Pruebas de cuotas, persistencia, recuperacion, cache, estados y cambios horarios
+  del Pacifico; conservada la prueba de transferencia HTTP 308.
+
 ### Verificacion de contenido y recuperacion de estados
 
 - Normalizado el resultado remoto `succeeded` como procesamiento terminado; se

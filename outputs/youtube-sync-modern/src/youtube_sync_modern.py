@@ -30,7 +30,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
-    QStackedWidget,
     QSplitter,
     QStyle,
     QSystemTrayIcon,
@@ -115,6 +114,7 @@ class PreviewThumbnail(QWidget):
 class ChannelLoader(QObject):
     finished = Signal(object, object)
     failed = Signal(str)
+    cached = Signal(str)
 
     def __init__(self, store, config) -> None:
         super().__init__()
@@ -130,6 +130,12 @@ class ChannelLoader(QObject):
             videos, playlists = client.channel_gallery()
             self.finished.emit(videos, playlists)
         except Exception as exc:
+            if engine.is_youtube_quota_error(exc):
+                snapshot = self.store.service_cache(engine.api_scope(self.config.client_secret_path), "gallery")
+                if snapshot:
+                    self.finished.emit(snapshot["data"]["videos"], snapshot["data"]["playlists"])
+                    self.cached.emit(snapshot["checked_at"])
+                    return
             self.failed.emit(engine.describe_error(exc))
 
 
@@ -588,6 +594,10 @@ class MainWindow(QMainWindow):
         self.auto_enabled = bool(self.config.auto_start_enabled)
         self.channel_loader = None
         self.youtube_check_running = False
+        self.api_pause_state = None
+        self._closing = False
+        self.thumbnail_jobs = queue.Queue()
+        self.thumbnail_pool_started = False
         self.video_rows: dict[int, dict] = {}
         self.channel_videos: list[dict] = []
         self.channel_rows_by_id: dict[int, dict] = {}
@@ -610,6 +620,9 @@ class MainWindow(QMainWindow):
         self.verification_timer = QTimer(self)
         self.verification_timer.timeout.connect(lambda: self.check_youtube(full=False))
         self.verification_timer.start(60000)
+        self.quota_timer = QTimer(self)
+        self.quota_timer.timeout.connect(self.update_quota_status)
+        self.quota_timer.start(1000)
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(QIcon(str(asset_path("youtube-sync.ico"))))
@@ -703,7 +716,7 @@ class MainWindow(QMainWindow):
         self.refresh_btn.setText("")
         self.refresh_btn.setToolTip("Actualizar")
         self.polish_header_tool(self.refresh_btn, self.symbol_icon(0x21BB))
-        self.refresh_btn.clicked.connect(lambda: self.refresh_all(light=False))
+        self.refresh_btn.clicked.connect(self.request_remote_refresh)
         self.settings_btn = QToolButton()
         self.settings_btn.setText("")
         self.settings_btn.setToolTip("Ajustes")
@@ -773,9 +786,10 @@ class MainWindow(QMainWindow):
         layout.addLayout(toolbar)
         self.video_summary = QLabel("Sin revisar")
         self.video_summary.setObjectName("Muted")
+        self.video_summary.setWordWrap(True)
         layout.addWidget(self.video_summary)
         self.video_table = QTableWidget(0, 6)
-        self.video_table.setHorizontalHeaderLabels(["Archivo", "Titulo", "Tamano", "Creado", "Estado", "Ruta"])
+        self.video_table.setHorizontalHeaderLabels(["Archivo", "Titulo", "Tamaño", "Creado", "Estado", "Ruta"])
         self.setup_table(self.video_table)
         layout.addWidget(self.video_table, 1)
         return page
@@ -1018,10 +1032,12 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         if self._allow_exit:
+            self.stop_background_work()
             event.accept()
             return
         if not bool(getattr(self.config, "close_to_tray", True)):
             if self.confirm_quit():
+                self.stop_background_work()
                 self._allow_exit = True
                 event.accept()
                 QTimer.singleShot(0, QApplication.quit)
@@ -1048,9 +1064,18 @@ class MainWindow(QMainWindow):
         if not self.confirm_quit():
             return
         self._allow_exit = True
+        self.stop_background_work()
         if hasattr(self, "tray"):
             self.tray.hide()
         QApplication.quit()
+
+    def stop_background_work(self) -> None:
+        self._closing = True
+        if self.worker:
+            self.worker.stop()
+        for timer in (self.timer, self.verification_timer, self.quota_timer, self.channel_render_timer,
+                      self.folder_refresh_timer, self.layout_timer):
+            timer.stop()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -1156,6 +1181,36 @@ class MainWindow(QMainWindow):
         if not light:
             self.check_youtube()
 
+    def request_remote_refresh(self) -> None:
+        scope = engine.api_scope(self.config.client_secret_path)
+        pause = self.store.api_pause(scope) or self.store.api_pause(scope, "upload")
+        if pause:
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("Cuota de YouTube")
+            dialog.setIcon(QMessageBox.Information)
+            dialog.setText("Google ha agotado la cuota. Los archivos y los estados anteriores se conservan.")
+            dialog.setInformativeText("Reintentar comprueba si Google ya ha renovado o ampliado la cuota; no reinicia su contador.")
+            quotas = dialog.addButton("Ver cuota", QMessageBox.ActionRole)
+            extension = dialog.addButton("Solicitar ampliacion", QMessageBox.ActionRole)
+            retry = dialog.addButton("Reintentar conexion", QMessageBox.AcceptRole)
+            close = dialog.addButton(QMessageBox.Close)
+            dialog.setDefaultButton(close)
+            dialog.exec()
+            clicked = dialog.clickedButton()
+            if clicked == quotas:
+                webbrowser.open("https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas")
+                return
+            if clicked == extension:
+                webbrowser.open("https://support.google.com/youtube/contact/yt_api_form")
+                return
+            if clicked != retry:
+                return
+            self.store.clear_api_pause(scope)
+            self.api_pause_state = None
+            if self.worker:
+                self.worker.refresh()
+        self.refresh_all(light=False)
+
     def refresh_config_card(self) -> None:
         folder = self.config.watch_folder or "Sin carpeta"
         category = engine.CATEGORY_NAMES_BY_ID.get(self.config.category_id, self.config.category_id)
@@ -1183,7 +1238,7 @@ class MainWindow(QMainWindow):
                 continue
         registry_by_signature, _ = self.store.registry_index()
         statuses_by_signature, _ = self.store.upload_status_index()
-        counts = {"Pendiente": 0, "Subido": 0, "Incidencia": 0, "En curso": 0}
+        counts = {"Pendiente": 0, "Subido": 0, "Incidencia": 0, "En curso": 0, "En espera": 0, "Por verificar": 0}
         for _, path in sorted(paths, key=lambda item: item[0]):
             try:
                 signature = engine.file_signature(path)
@@ -1198,6 +1253,13 @@ class MainWindow(QMainWindow):
                 status = "Subido"
             elif registry_row and registry_row[3] and registry_row[4] == "processing":
                 status = "En curso"
+            elif status_row and (status_row[3] == "waiting_quota" or
+                                 (status_row[3] == "error" and engine.is_youtube_quota_error(status_row[4] or ""))):
+                status = "En espera"
+            elif status_row and (status_row[3] == "verification_pending" or
+                                 (status_row[3] == "error" and any(
+                                     text in (status_row[4] or "").lower() for text in ("datos suficientes", "no hay huella")))):
+                status = "Por verificar"
             elif status_row and status_row[3] in {"error", "cancelled"}:
                 status = "Incidencia"
             elif status_row and status_row[3] in {"uploading", "processing"}:
@@ -1213,11 +1275,16 @@ class MainWindow(QMainWindow):
                 "Subido": "#22c55e",
                 "Incidencia": "#f59e0b",
                 "En curso": "#c084fc",
+                "En espera": "#a7adb8",
+                "Por verificar": "#eab308",
             }
             for column, value in enumerate(values):
                 self.video_table.setItem(row, column, table_item(value, status_colors.get(status, "") if column == 4 else ""))
             if status_row and status_row[4]:
                 self.video_table.item(row, 4).setToolTip(status_row[4])
+            if status == "Subido" and registry_row:
+                self.video_table.item(row, 4).setToolTip(
+                    f"Ultima confirmacion: {registry_row[5]}\nhttps://youtu.be/{registry_row[3]}\nSe conserva aunque el archivo siga en la carpeta.")
             self.video_rows[row] = {
                 "path": str(path),
                 "signature": signature,
@@ -1227,7 +1294,7 @@ class MainWindow(QMainWindow):
             }
         self.video_table.setSortingEnabled(True)
         self.video_summary.setText(
-            f"Total {len(paths)} / Pendientes {counts['Pendiente']} / En curso {counts['En curso']} / Subidos {counts['Subido']} / Incidencias {counts['Incidencia']}"
+            f"Total {len(paths)} / Pendientes {counts['Pendiente']} / En curso {counts['En curso']} / En espera {counts['En espera']} / Por verificar {counts['Por verificar']} / Subidos {counts['Subido']} / Incidencias {counts['Incidencia']}"
         )
         self.state_card.set("Preparado", f"{len(paths)} videos en la carpeta")
 
@@ -1239,13 +1306,16 @@ class MainWindow(QMainWindow):
         row = selected[0].row()
         path = self.video_table.item(row, 5).text() if self.video_table.item(row, 5) else ""
         signature = ""
+        youtube_id = ""
         for data in self.video_rows.values():
             if data.get("path") == path:
                 signature = data.get("signature", "")
+                youtube_id = data.get("youtube_id", "")
                 break
         return {
             "path": path,
             "signature": signature,
+            "youtube_id": youtube_id,
             "title": self.video_table.item(row, 1).text() if self.video_table.item(row, 1) else "",
             "status": self.video_table.item(row, 4).text() if self.video_table.item(row, 4) else "",
         }
@@ -1359,6 +1429,11 @@ class MainWindow(QMainWindow):
         if not self.config.client_secret_path or not Path(self.config.client_secret_path).exists():
             self.state_card.set("Sin OAuth", "Configura el JSON de YouTube.")
             return
+        pause = self.store.api_pause(engine.api_scope(self.config.client_secret_path))
+        if pause:
+            self.api_pause_state = pause
+            self.update_quota_status()
+            return
         self.youtube_check_running = True
         self.status.setText("Comprobando videos con YouTube...")
         threading.Thread(target=self._check_youtube_thread, args=(full,), daemon=True).start()
@@ -1376,7 +1451,32 @@ class MainWindow(QMainWindow):
                 self.events.put(("log", f"Comprobacion de YouTube: {changed} estado(s) actualizado(s)."))
             self.events.put(("youtube", info))
         except Exception as exc:
-            self.events.put(("youtube_error", engine.describe_error(exc)))
+            if engine.is_youtube_quota_error(exc) and not engine.is_youtube_channel_upload_limit(exc):
+                state = exc.state if isinstance(exc, engine.ApiQuotaUnavailable) else (
+                    self.store.api_pause(client.scope) or self.store.defer_api(client.scope, exc))
+                self.events.put(("api_quota", state))
+                self.events.put(("youtube_check_done", None))
+            else:
+                self.events.put(("youtube_error", engine.describe_error(exc)))
+
+    def update_quota_status(self) -> None:
+        if not self.api_pause_state:
+            return
+        retry = engine.datetime.fromisoformat(self.api_pause_state["retry_at"]).astimezone()
+        if retry <= engine.datetime.now().astimezone():
+            self.api_pause_state = None
+            self.check_youtube(full=True)
+            if self.worker:
+                self.worker.refresh()
+            return
+        remaining = engine.remaining_text(retry)
+        self.status.setText(f"Sin cuota API / Proxima comprobacion {retry:%d/%m %H:%M} / {remaining}")
+        if self.api_pause_state.get("bucket") != "upload":
+            self.state_card.set("Consulta local", "Sin cuota API / estados conservados")
+
+    def channel_cache_loaded(self, checked_at: str) -> None:
+        stamp = engine.datetime.fromisoformat(checked_at).astimezone()
+        self.channel_summary.setText(f"Copia local del canal / ultima consulta {stamp:%d/%m %H:%M} / sin verificacion en directo")
 
     def tab_changed(self, index: int) -> None:
         if self.tabs.tabText(index) == "Canal" and self.channel_table.rowCount() == 0:
@@ -1390,11 +1490,10 @@ class MainWindow(QMainWindow):
             return
         self.channel_summary.setText("Cargando canal desde YouTube...")
         self.channel_loader_bar.show()
-        self.channel_table.setRowCount(1)
-        self.channel_table.setItem(0, 0, table_item("Cargando canal..."))
         self.channel_loader = ChannelLoader(self.store, self.config)
         self.channel_loader.finished.connect(self.apply_channel_rows)
         self.channel_loader.failed.connect(self.channel_failed)
+        self.channel_loader.cached.connect(self.channel_cache_loaded)
         self.channel_loader.start()
 
     def apply_channel_rows(self, videos, playlists) -> None:
@@ -1505,17 +1604,26 @@ class MainWindow(QMainWindow):
         if not video_id or video_id in self.thumbnail_pending:
             return
         self.thumbnail_pending.add(video_id)
+        self.thumbnail_jobs.put((video_id, self.thumbnail_url(video)))
+        if not self.thumbnail_pool_started:
+            self.thumbnail_pool_started = True
+            for _ in range(6):
+                threading.Thread(target=self.load_thumbnail_jobs, daemon=True).start()
 
-        def worker() -> None:
+    def load_thumbnail_jobs(self) -> None:
+        while not self._closing:
             try:
-                request = urllib.request.Request(self.thumbnail_url(video), headers={"User-Agent": APP_NAME})
+                video_id, url = self.thumbnail_jobs.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                request = urllib.request.Request(url, headers={"User-Agent": APP_NAME})
                 with urllib.request.urlopen(request, timeout=12) as response:
                     data = response.read()
-                self.thumbnail_loaded.emit(video_id, data)
             except Exception:
-                self.thumbnail_loaded.emit(video_id, b"")
-
-        threading.Thread(target=worker, daemon=True).start()
+                data = b""
+            if not self._closing:
+                self.thumbnail_loaded.emit(video_id, data)
 
     def apply_thumbnail(self, video_id: str, data: object) -> None:
         self.thumbnail_pending.discard(video_id)
@@ -1782,7 +1890,12 @@ class MainWindow(QMainWindow):
         self.channel_loader_bar.hide()
         self.channel_loader = None
         self.channel_summary.setText(f"No se pudo cargar el canal: {message}")
-        QMessageBox.warning(self, APP_NAME, self.channel_summary.text())
+        if engine.is_youtube_quota_error(message):
+            scope = engine.api_scope(self.config.client_secret_path)
+            self.api_pause_state = self.store.api_pause(scope) or self.store.api_pause(scope, "upload")
+            self.update_quota_status()
+        else:
+            QMessageBox.warning(self, APP_NAME, self.channel_summary.text())
 
     def open_settings(self) -> None:
         if self.settings_dialog is not None:
@@ -1810,7 +1923,8 @@ class MainWindow(QMainWindow):
                 self.progress.setValue(percent)
                 self.upload_card.set(f"{percent}%" if filename else "Sin actividad", filename or "Esperando videos")
             elif kind == "busy":
-                self.status.setText("Trabajando..." if value else "Preparado")
+                if not self.api_pause_state:
+                    self.status.setText("Trabajando..." if value else "Preparado")
             elif kind == "upload_completed":
                 self.folder_refresh_timer.start(0)
                 self.check_youtube(full=False)
@@ -1820,6 +1934,12 @@ class MainWindow(QMainWindow):
                 self.auto_enabled = False
                 self.update_auto_button()
                 self.upload_card.set("Limite YouTube", value.get("message", "Reintento mas tarde"))
+            elif kind == "api_quota":
+                self.api_pause_state = value
+                self.upload_card.set("En espera", "Cuota API / archivos conservados")
+                self.update_quota_status()
+            elif kind == "youtube_check_done":
+                self.youtube_check_running = False
             elif kind == "youtube":
                 self.youtube_check_running = False
                 self.state_card.set("Conectado", value.get("title", "Canal conectado"))
@@ -2097,7 +2217,10 @@ def main() -> None:
         Path(sys.argv[2]).write_text(json.dumps({"ok": True, "ui": "qt", "ssl": True}), encoding="utf-8")
         return
     window = MainWindow()
-    window.show()
+    if window.config.start_minimized and QSystemTrayIcon.isSystemTrayAvailable():
+        window.hide()
+    else:
+        window.show()
     window.check_youtube()
     if window.auto_enabled:
         window.start_worker()
