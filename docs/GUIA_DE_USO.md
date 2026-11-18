@@ -16,13 +16,26 @@ El codigo del repositorio se ejecuta o compila siguiendo la
 
 ## Primera configuracion
 
-1. Abre Ajustes con el engranaje.
-2. En General, selecciona la carpeta y las extensiones de video.
-3. Decide si quieres incluir subcarpetas.
-4. En YouTube, selecciona el JSON OAuth o abre Asistente JSON.
-5. Selecciona privacidad, categoria y, si procede, lista de reproduccion.
-6. Guarda y pulsa Actualizar para comprobar la conexion.
-7. Cuando se abra el navegador para autorizar, elige la cuenta del canal correcto.
+1. Al abrir por primera vez aparece **Conectar mi canal**. Tambien puedes abrirlo
+   desde Ajustes > YouTube. Si ya tienes credenciales, pulsa **Ya tengo mi JSON OAuth**.
+2. El asistente te guia para crear tu proyecto de Google Cloud, activar YouTube
+   Data API v3 y crear un cliente OAuth de tipo escritorio.
+3. Selecciona el JSON descargado. La app lo valida y conserva una copia bajo
+   `%APPDATA%\YouTubeSync\oauth`; ya no depende del original de Descargas.
+4. Pulsa **Conectar con Google**. La autorizacion se abre en el navegador del
+   sistema. Nunca se pide tu contrasena dentro de YouTubeSync.
+5. Revisa el nombre, la imagen y el ID del canal y marca **Este es mi canal**.
+   **Elegir otra cuenta** vuelve a abrir la seleccion en Google.
+6. Elige carpeta, subcarpetas, privacidad y lista. Marca **Subir automaticamente**
+   solo si quieres ese modo; inicialmente esta desactivado en el asistente.
+7. Pulsa **Guardar y finalizar**. La app recuerda la autorizacion y las opciones.
+   Si elegiste Auto, se comprueba primero el canal antes de iniciar el trabajador.
+
+Puedes pulsar **Configurar mas tarde** sin completar la conexion ni iniciar
+subidas. Cancelar tampoco sustituye la cuenta activa por una cuenta provisional.
+Los usuarios con carpeta y credenciales ya configuradas mantienen el arranque
+habitual, sin tener que repetir el asistente. El resto de opciones, como categoria,
+extensiones, limpieza e inicio con Windows, siguen disponibles en Ajustes.
 
 ### Obtener el JSON OAuth
 
@@ -63,7 +76,9 @@ estado y ruta. Pulsa una cabecera para ordenar por esa columna.
 | --- | --- |
 | Pendiente | El archivo necesita una subida o una comprobacion adicional. |
 | En curso | Se esta transfiriendo o comprobando su procesamiento. |
-| Subido | Existe una referencia al video en el registro local. |
+| Subido | Correspondencia y procesamiento confirmados; se conserva la ultima confirmacion. |
+| En espera | Falta cuota para continuar, sin convertirlo en un fallo del archivo. |
+| Por verificar | Faltan datos suficientes para confirmar la correspondencia con el canal. |
 | Incidencia | Se ha registrado un error o una cancelacion. |
 
 El estado local Subido no sustituye la comprobacion remota: antes de eliminar

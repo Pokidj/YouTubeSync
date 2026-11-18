@@ -176,6 +176,43 @@ class ResponsiveLayoutTests(unittest.TestCase):
         self.assertEqual(thread.call_count, 6)
         self.assertEqual(self.window.thumbnail_jobs.qsize(), 100)
 
+    def test_first_run_opens_setup_without_starting_uploads(self):
+        with patch.object(self.window, "open_setup") as setup, patch.object(self.window, "start_worker") as worker:
+            self.window.initialize_session()
+        setup.assert_called_once()
+        worker.assert_not_called()
+        self.assertFalse(self.window.auto_enabled)
+
+    def test_configured_users_keep_the_normal_startup_flow(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
+            secret = Path(temporary) / "client.json"
+            secret.write_text("{}")
+            self.window.config = ui.engine.Config(watch_folder=temporary, client_secret_path=str(secret))
+            self.window.auto_enabled = True
+            with patch.object(self.window, "open_setup") as setup, patch.object(self.window, "check_youtube") as check, \
+                    patch.object(self.window, "start_worker") as worker:
+                self.window.initialize_session()
+            setup.assert_not_called()
+            check.assert_called_once()
+            worker.assert_called_once()
+
+    def test_auto_after_setup_waits_for_the_remote_reconciliation(self):
+        self.window.auto_enabled = True
+        self.window._resume_after_setup_check = True
+        self.window.events.put(("youtube", {"title": "Canal"}))
+        with patch.object(self.window, "start_worker") as worker:
+            self.window.process_events()
+        worker.assert_called_once()
+        self.assertFalse(self.window._resume_after_setup_check)
+
+    def test_settings_search_finds_the_connection_tab(self):
+        self.window.open_settings()
+        dialog = self.window.settings_dialog
+        dialog.settings_search.setText("conectar")
+        tabs = dialog.findChild(ui.QTabWidget)
+        self.assertEqual(tabs.tabText(tabs.currentIndex()), "YouTube")
+        dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()

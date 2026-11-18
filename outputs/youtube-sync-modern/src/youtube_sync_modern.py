@@ -48,6 +48,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 import youtube_sync_engine as engine
+from youtube_sync_setup import SetupWizard
 
 
 def asset_path(name: str) -> Path:
@@ -139,122 +140,9 @@ class ChannelLoader(QObject):
             self.failed.emit(engine.describe_error(exc))
 
 
-class OAuthWizard(QDialog):
-    json_selected = Signal(str)
-
-    STEPS = [
-        {
-            "title": "1 de 4 - Crea un proyecto en Google",
-            "body": (
-                "Necesitas un proyecto en Google Cloud para dar acceso a la API de YouTube.\n\n"
-                "1. Abre Google Cloud Console.\n"
-                "2. Inicia sesion con la cuenta del canal.\n"
-                "3. Crea un proyecto nuevo con cualquier nombre.\n"
-                "4. Cuando lo tengas, pulsa Siguiente."
-            ),
-            "button": "Abrir Google Cloud Console",
-            "url": "https://console.cloud.google.com/projectcreate",
-        },
-        {
-            "title": "2 de 4 - Activa YouTube Data API v3",
-            "body": (
-                "Ahora activa la API de YouTube en ese proyecto.\n\n"
-                "1. Asegurate de tener seleccionado tu proyecto arriba.\n"
-                "2. Pulsa el boton azul Habilitar.\n"
-                "3. Cuando este activada, pulsa Siguiente."
-            ),
-            "button": "Activar YouTube Data API v3",
-            "url": "https://console.cloud.google.com/apis/library/youtube.googleapis.com",
-        },
-        {
-            "title": "3 de 4 - Crea las credenciales",
-            "body": (
-                "Crea un ID de cliente OAuth.\n\n"
-                "1. Ve a Crear credenciales.\n"
-                "2. Elige ID de cliente OAuth.\n"
-                "3. Si pide pantalla de consentimiento, usa Externo y completa lo basico.\n"
-                "4. Tipo de aplicacion: Aplicacion de escritorio.\n"
-                "5. Descarga el JSON."
-            ),
-            "button": "Ir a Credenciales",
-            "url": "https://console.cloud.google.com/apis/credentials",
-        },
-        {
-            "title": "4 de 4 - Selecciona el JSON",
-            "body": (
-                "Selecciona el archivo JSON descargado.\n\n"
-                "La primera vez que conectes YouTube se abrira el navegador para autorizar la app."
-            ),
-            "button": "Seleccionar archivo JSON",
-            "url": "",
-        },
-    ]
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.index = 0
-        self.setWindowTitle("Asistente JSON OAuth")
-        self.setWindowIcon(QIcon(str(asset_path("youtube-sync.ico"))))
-        self.setMinimumSize(620, 430)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        self.title = QLabel()
-        self.title.setObjectName("PageTitle")
-        self.body = QLabel()
-        self.body.setWordWrap(True)
-        self.body.setObjectName("WizardBody")
-        self.main_button = QPushButton()
-        self.main_button.setObjectName("PrimaryButton")
-        self.main_button.clicked.connect(self.primary_action)
-        nav = QHBoxLayout()
-        self.prev_button = QPushButton("Anterior")
-        self.next_button = QPushButton("Siguiente")
-        close_button = QPushButton("Cerrar")
-        self.prev_button.clicked.connect(self.previous_step)
-        self.next_button.clicked.connect(self.next_step)
-        close_button.clicked.connect(self.close)
-        nav.addWidget(self.prev_button)
-        nav.addStretch(1)
-        nav.addWidget(self.next_button)
-        nav.addWidget(close_button)
-        layout.addWidget(self.title)
-        layout.addWidget(self.body, 1)
-        layout.addWidget(self.main_button)
-        layout.addLayout(nav)
-        self.render()
-
-    def render(self) -> None:
-        step = self.STEPS[self.index]
-        self.title.setText(step["title"])
-        self.body.setText(step["body"])
-        self.main_button.setText(step["button"])
-        self.prev_button.setEnabled(self.index > 0)
-        self.next_button.setText("Finalizar" if self.index == len(self.STEPS) - 1 else "Siguiente")
-
-    def primary_action(self) -> None:
-        step = self.STEPS[self.index]
-        if step["url"]:
-            webbrowser.open(step["url"])
-            return
-        path, _ = QFileDialog.getOpenFileName(self, "Selecciona JSON OAuth", "", "JSON (*.json)")
-        if path:
-            self.json_selected.emit(path)
-            self.close()
-
-    def previous_step(self) -> None:
-        self.index = max(0, self.index - 1)
-        self.render()
-
-    def next_step(self) -> None:
-        if self.index == len(self.STEPS) - 1:
-            self.close()
-            return
-        self.index += 1
-        self.render()
-
-
 class SettingsDialog(QWidget):
     saved = Signal()
+    setup_requested = Signal()
 
     def __init__(self, store, config, parent=None) -> None:
         super().__init__(parent, Qt.Window)
@@ -298,7 +186,7 @@ class SettingsDialog(QWidget):
         def tracked_section(parent_layout: QVBoxLayout, title_text: str, terms: str) -> QFrame:
             frame = self.section(title_text)
             parent_layout.addWidget(frame)
-            self.settings_sections.append((frame, tabs.count() - 1, f"{title_text} {terms}".casefold()))
+            self.settings_sections.append((frame, tabs.indexOf(parent_layout.parentWidget()), f"{title_text} {terms}".casefold()))
             return frame
 
         general_page, general_layout = tab_page("General")
@@ -331,11 +219,11 @@ class SettingsDialog(QWidget):
         folder_layout.addWidget(self.recursive)
         general_layout.addStretch(1)
 
-        youtube = tracked_section(youtube_tab_layout, "YouTube / OAuth", "json oauth credenciales privacidad categoria")
+        youtube = tracked_section(youtube_tab_layout, "YouTube / OAuth", "json oauth credenciales privacidad categoria canal conexion conectar asistente")
         youtube_layout = youtube.layout()
         self.oauth = self.path_row(youtube_layout, "JSON OAuth", config.client_secret_path, self.pick_json)
         oauth_tools = QHBoxLayout()
-        wizard_button = QPushButton("Asistente JSON")
+        wizard_button = QPushButton("Conectar mi canal")
         wizard_button.clicked.connect(self.open_oauth_wizard)
         oauth_tools.addStretch(1)
         oauth_tools.addWidget(wizard_button)
@@ -470,12 +358,24 @@ class SettingsDialog(QWidget):
     def pick_json(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Selecciona JSON OAuth", "", "JSON (*.json)")
         if path:
-            self.oauth.setText(path)
+            try:
+                self.oauth.setText(str(self.store.import_oauth_json(Path(path))))
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, "JSON OAuth", str(exc))
 
     def open_oauth_wizard(self) -> None:
-        wizard = OAuthWizard(self)
-        wizard.json_selected.connect(self.oauth.setText)
-        wizard.exec()
+        self.setup_requested.emit()
+
+    def apply_connection(self, config: engine.Config) -> None:
+        self.config = config
+        self.oauth.setText(config.client_secret_path)
+        self.folder.setText(config.watch_folder)
+        self.recursive.setChecked(config.recursive)
+        self.auto_start.setChecked(config.auto_start_enabled)
+        self.privacy.setCurrentIndex(self.privacy.findText({"private": "Privado", "unlisted": "Oculto", "public": "Publico"}[config.privacy_status]))
+        self.set_playlist_options([{"id": "", "title": "Ninguna"},
+                                   {"id": config.playlist_id, "title": config.playlist_name}] if config.playlist_id
+                                  else [{"id": "", "title": "Ninguna"}], config.playlist_id)
 
     def load_playlists(self) -> None:
         path = self.oauth.text().strip()
@@ -530,9 +430,16 @@ class SettingsDialog(QWidget):
             QMessageBox.warning(self, "Crear lista", f"No se pudo crear la lista:\n\n{engine.describe_error(exc)}")
 
     def save(self) -> None:
+        oauth = self.oauth.text().strip()
+        if oauth:
+            try:
+                oauth = str(self.store.import_oauth_json(Path(oauth)))
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, "JSON OAuth", str(exc))
+                return
         privacy = {"Privado": "private", "Oculto": "unlisted", "Publico": "public"}[self.privacy.currentText()]
         self.config.watch_folder = self.folder.text().strip()
-        self.config.client_secret_path = self.oauth.text().strip()
+        self.config.client_secret_path = oauth
         self.config.privacy_status = privacy
         self.config.category_id = engine.CATEGORIES.get(self.category.currentText(), "22")
         playlist_label = self.playlist_combo.currentText() or "Ninguna"
@@ -591,6 +498,8 @@ class MainWindow(QMainWindow):
         self.worker = None
         self._allow_exit = False
         self.settings_dialog = None
+        self.setup_dialog = None
+        self._resume_after_setup_check = False
         self.auto_enabled = bool(self.config.auto_start_enabled)
         self.channel_loader = None
         self.youtube_check_running = False
@@ -1071,6 +980,8 @@ class MainWindow(QMainWindow):
 
     def stop_background_work(self) -> None:
         self._closing = True
+        if self.setup_dialog is not None:
+            self.setup_dialog.reject()
         if self.worker:
             self.worker.stop()
         for timer in (self.timer, self.verification_timer, self.quota_timer, self.channel_render_timer,
@@ -1146,6 +1057,58 @@ class MainWindow(QMainWindow):
             self.worker.upload_path(manual_path)
         self.worker.set_enabled(self.auto_enabled)
         self.worker.start()
+
+    def initialize_session(self) -> None:
+        if (not self.config.client_secret_path or not Path(self.config.client_secret_path).is_file()
+                or not self.config.watch_folder or not Path(self.config.watch_folder).is_dir()):
+            self.auto_enabled = False
+            self.update_auto_button()
+            self.show()
+            self.open_setup()
+            return
+        self.check_youtube()
+        if self.auto_enabled:
+            self.start_worker()
+
+    def open_setup(self) -> None:
+        if self.setup_dialog is not None:
+            self.setup_dialog.raise_()
+            self.setup_dialog.activateWindow()
+            return
+        if self.youtube_check_running or self.channel_loader is not None or (self.worker and self.worker.busy_event.is_set()):
+            QMessageBox.information(self, APP_NAME, "Espera a que termine la comprobacion o la subida actual. Puedes cancelar la subida antes de cambiar la conexion.")
+            return
+        self.auto_enabled = False
+        self.update_auto_button()
+        if self.worker:
+            self.worker.pause_after_current()
+        self.setup_dialog = SetupWizard(self.store, self.store.load_config(), self)
+        self.setup_dialog.setWindowModality(Qt.ApplicationModal)
+        self.setup_dialog.configured.connect(self.setup_configured)
+        self.setup_dialog.finished.connect(self.setup_finished)
+        self.setup_dialog.show()
+
+    def setup_configured(self, config: engine.Config) -> None:
+        self.config = config
+        self.auto_enabled = config.auto_start_enabled
+        self._resume_after_setup_check = self.auto_enabled
+        self.update_auto_button()
+        if self.settings_dialog is not None:
+            self.settings_dialog.apply_connection(config)
+        self.channel_videos = []
+        self.channel_table.setRowCount(0)
+        self.refresh_all(light=True)
+        self.state_card.set("Canal confirmado", config.connected_channel_name)
+
+    def setup_finished(self, result: int) -> None:
+        dialog = self.setup_dialog
+        self.setup_dialog = None
+        if dialog is not None:
+            dialog.deleteLater()
+        if result == QDialog.Accepted:
+            self.check_youtube()
+        else:
+            self.status.setText("Configuracion aplazada / Auto OFF")
 
     def toggle_auto(self) -> None:
         self.auto_enabled = not self.auto_enabled
@@ -1424,7 +1387,7 @@ class MainWindow(QMainWindow):
         self.events.put(("local_delete_result", {"deleted": deleted, "errors": errors}))
 
     def check_youtube(self, full: bool = True) -> None:
-        if self.youtube_check_running:
+        if self.youtube_check_running or self.setup_dialog is not None or self._closing:
             return
         if not self.config.client_secret_path or not Path(self.config.client_secret_path).exists():
             self.state_card.set("Sin OAuth", "Configura el JSON de YouTube.")
@@ -1907,6 +1870,7 @@ class MainWindow(QMainWindow):
         dialog.setAttribute(Qt.WA_DeleteOnClose)
         dialog.destroyed.connect(lambda: setattr(self, "settings_dialog", None))
         dialog.saved.connect(lambda: self.refresh_all(light=False))
+        dialog.setup_requested.connect(self.open_setup)
         dialog.show()
 
     def process_events(self) -> None:
@@ -1944,6 +1908,10 @@ class MainWindow(QMainWindow):
                 self.youtube_check_running = False
                 self.state_card.set("Conectado", value.get("title", "Canal conectado"))
                 self.status.setText("Videos comprobados con YouTube")
+                if self._resume_after_setup_check:
+                    self._resume_after_setup_check = False
+                    if self.auto_enabled:
+                        self.start_worker()
             elif kind == "youtube_error":
                 self.youtube_check_running = False
                 self.state_card.set("Sin conexion", value)
@@ -2121,6 +2089,11 @@ def apply_style(app: QApplication) -> None:
         #PrimaryButton:hover {
             background: #ff3157;
         }
+        #PrimaryButton:disabled {
+            color: #757b87;
+            background: #1c1d21;
+            border-color: #282a30;
+        }
         #DangerButton {
             background: #991b1b;
             border-color: #ef4444;
@@ -2221,9 +2194,7 @@ def main() -> None:
         window.hide()
     else:
         window.show()
-    window.check_youtube()
-    if window.auto_enabled:
-        window.start_worker()
+    QTimer.singleShot(0, window.initialize_session)
     sys.exit(app.exec())
 
 

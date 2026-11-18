@@ -410,6 +410,8 @@ class Config:
     auto_delete_uploaded: bool = False
     auto_delete_after_hours: int = 24
     auto_delete_after_unit: str = "horas"
+    connected_channel_id: str = ""
+    connected_channel_name: str = ""
 
     @property
     def extension_set(self) -> set[str]:
@@ -452,6 +454,59 @@ class Store:
             return self.token_path
         digest = hashlib.sha256(str(Path(client_secret_path)).lower().encode("utf-8", errors="replace")).hexdigest()[:12]
         return self.base / f"youtube-token-{digest}.json"
+
+    def import_oauth_json(self, source: Path) -> Path:
+        try:
+            if source.stat().st_size > 1024 * 1024:
+                raise ValueError("El archivo es demasiado grande para ser un JSON OAuth de escritorio.")
+            data = json.loads(source.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError("No se puede leer el JSON. Selecciona el archivo descargado de Google Cloud.") from exc
+        installed = data.get("installed") if isinstance(data, dict) else None
+        if not isinstance(installed, dict) or "web" in data:
+            raise ValueError("Selecciona credenciales OAuth de tipo Aplicacion de escritorio, no web ni cuenta de servicio.")
+        client_id = installed.get("client_id", "")
+        if not isinstance(client_id, str) or not client_id.endswith(".apps.googleusercontent.com"):
+            raise ValueError("El JSON no contiene un ID de cliente de Google valido.")
+        if installed.get("auth_uri") not in {"https://accounts.google.com/o/oauth2/auth", "https://accounts.google.com/o/oauth2/v2/auth"}:
+            raise ValueError("El enlace de autorizacion del JSON no es un enlace oficial de Google.")
+        if installed.get("token_uri") not in {"https://oauth2.googleapis.com/token", "https://accounts.google.com/o/oauth2/token", "https://www.googleapis.com/oauth2/v4/token"}:
+            raise ValueError("El servidor de tokens del JSON no es un servidor oficial de Google.")
+        digest = hashlib.sha256(client_id.encode("utf-8")).hexdigest()[:16]
+        folder = self.base / "oauth"
+        folder.mkdir(parents=True, exist_ok=True)
+        destination = folder / f"client-{digest}.json"
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=folder, suffix=".tmp", delete=False) as output:
+                temporary = Path(output.name)
+                json.dump({"installed": installed}, output, indent=2)
+            temporary.replace(destination)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        target_token = self.token_path_for(str(destination))
+        if not target_token.exists():
+            previous = self.load_config().client_secret_path
+            for candidate in (self.token_path_for(str(source)), self.token_path_for(previous), self.token_path):
+                try:
+                    token = json.loads(candidate.read_text(encoding="utf-8"))
+                    if isinstance(token, dict) and token.get("client_id") == client_id:
+                        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.base, suffix=".tmp", delete=False) as output:
+                            temporary = Path(output.name)
+                            json.dump(token, output)
+                        temporary.replace(target_token)
+                        break
+                except (OSError, UnicodeError, json.JSONDecodeError):
+                    continue
+                finally:
+                    if temporary is not None:
+                        temporary.unlink(missing_ok=True)
+        for bucket in ("general", "upload"):
+            pause = self.api_pause(api_scope(str(source)), bucket)
+            if pause and not self.api_pause(api_scope(str(destination)), bucket):
+                self.save_service_cache(api_scope(str(destination)), "quota_" + bucket, pause)
+        return destination
 
     def _init_db(self) -> None:
         with self._connection() as db:
@@ -908,12 +963,13 @@ class QuotaAwareHttp:
 
 
 class YouTubeClient:
-    def __init__(self, store: Store, config: Config, log: Callable[[str], None], client_secret_path: str = "", label: str = "principal") -> None:
+    def __init__(self, store: Store, config: Config, log: Callable[[str], None], client_secret_path: str = "", label: str = "principal", force_authorize: bool = False) -> None:
         self.store = store
         self.config = config
         self.log = log
         self.client_secret_path = client_secret_path or config.client_secret_path
         self.label = label
+        self.force_authorize = force_authorize
         self.token_path = store.token_path_for(self.client_secret_path)
         self.scope = api_scope(self.client_secret_path)
         self._service = None
@@ -960,7 +1016,7 @@ class YouTubeClient:
 
     def _authorize(self):
         creds = None
-        if self.token_path.exists():
+        if self.token_path.exists() and not self.force_authorize:
             try:
                 creds = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
             except Exception:
@@ -985,10 +1041,10 @@ class YouTubeClient:
                 if not self.client_secret_path or not Path(self.client_secret_path).exists():
                     raise RuntimeError("Selecciona el archivo client_secret.json en Configuracion.")
                 self.log(f"Autorizando credencial OAuth {self.label}.")
-                flow = InstalledAppFlow.from_client_secrets_file(self.client_secret_path, SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(self.client_secret_path, SCOPES, autogenerate_code_verifier=True)
                 flow.fetch_token = partial(flow.fetch_token, timeout=30)
                 creds = flow.run_local_server(
-                    port=0, prompt="consent", timeout_seconds=180,
+                    port=0, prompt="consent select_account", timeout_seconds=180,
                     authorization_prompt_message="",
                 )
             if not creds or not creds.valid:
@@ -1021,6 +1077,8 @@ class YouTubeClient:
             "id": item.get("id", ""),
             "uploads": uploads,
             "description": snippet.get("description", ""),
+            "thumbnail": (snippet.get("thumbnails", {}).get("high", {}).get("url")
+                          or snippet.get("thumbnails", {}).get("default", {}).get("url") or ""),
         }
         return self._channel_info
 
@@ -1469,6 +1527,7 @@ class SyncWorker(threading.Thread):
         self.wake_event = threading.Event()
         self.cancel_upload_event = threading.Event()
         self.enabled_event = threading.Event()
+        self.busy_event = threading.Event()
         self.manual_uploads: queue.Queue[Path] = queue.Queue()
         self.last_cleanup_warning_key = ""
         self.active_path: Path | None = None
@@ -1563,11 +1622,14 @@ class SyncWorker(threading.Thread):
                 self.wake_event.clear()
                 continue
             try:
+                self.busy_event.set()
                 self.scan_once(manual_path)
                 if self.enabled_event.is_set():
                     self.auto_cleanup_once()
             except Exception as exc:
                 self.log(f"Error: {describe_error(exc)}")
+            finally:
+                self.busy_event.clear()
             self.events.put(("busy", False))
             config = self.get_config()
             self.wake_event.wait(max(2, int(config.scan_interval_seconds)))
@@ -1631,6 +1693,8 @@ class SyncWorker(threading.Thread):
             return
         for path, video_id in zip(pending, identities):
             if self.stop_event.is_set() or self.cancel_upload_event.is_set():
+                return
+            if manual_path is None and not self.enabled_event.is_set():
                 return
             self.active_path = path
             try:

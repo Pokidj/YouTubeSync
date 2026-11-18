@@ -5,6 +5,23 @@ asignarles una nueva version. La version mostrada por la app sigue siendo 1.0.
 
 ## Sin publicar
 
+### Primera conexion con credenciales propias
+
+- Asistente integrado de siete pasos: inicio, proyecto, API, credenciales,
+  autorizacion, confirmacion del canal y opciones de subida.
+- Acceso directo para usuarios que ya tienen JSON; copia gestionada y validacion
+  de cliente de escritorio y servidores oficiales de autorizacion y tokens.
+- Migracion de autorizaciones compatibles y pausas de cuota al importar el JSON.
+- Autorizacion en navegador externo con PKCE explicito y seleccion de cuenta;
+  comprobacion de nombre, imagen e ID antes de guardar.
+- Token provisional durante el asistente; cancelar no cambia la cuenta activa.
+  Guardar confirma conexion, carpeta, privacidad, lista y modo de subida.
+- Primer arranque sin subidas automaticas por defecto; Auto elegido expresamente
+  espera la conciliacion del canal. Los usuarios configurados conservan su flujo.
+- Sustituido el asistente JSON antiguo; entrada unica desde Ajustes y busqueda
+  de ajustes corregida para encontrar la conexion en la pestana YouTube.
+- Pruebas de importacion, cancelacion, fallos de guardado, confirmacion, navegacion,
+  arranque nuevo/existente y conservacion de las funciones anteriores.
 ### Revision de persistencia y seguridad
 
 - Recibo persistente de cada nueva transferencia completada: ID devuelto por

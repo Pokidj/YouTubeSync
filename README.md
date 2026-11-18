@@ -25,6 +25,7 @@ Version actual: **1.0**.
 - Reproduccion en el navegador y enlaces para compartir.
 - Limpieza local con verificacion previa del video en YouTube.
 - Ajustes por pestanas, bandeja del sistema e inicio con Windows configurable.
+- Primera conexion guiada, confirmacion del canal y credenciales propias por usuario.
 
 Las subidas y consultas estan sujetas a los limites de YouTube. El actualizador
 de Ajustes es una reserva para futuras versiones y todavia no esta operativo.
@@ -65,9 +66,12 @@ para conservar configuracion, token y registro de subidas.
 
 ## Configuracion
 
-Selecciona la carpeta y el JSON OAuth desde Ajustes. El asistente JSON explica
-como crear credenciales de aplicacion de escritorio en Google Cloud.
-Cada usuario debe aportar sus propias credenciales y autorizar su canal.
+En la primera apertura aparece **Conectar mi canal**: proyecto propio, API,
+credenciales de escritorio, autorizacion en el navegador, confirmacion del canal
+y carpeta. Tambien se puede abrir desde Ajustes > YouTube. Hay un acceso directo
+para quien ya tenga el JSON. La app conserva su copia y recuerda la autorizacion.
+Cada usuario aporta su propio proyecto; no se distribuyen credenciales comunes
+ni se alternan proyectos automaticamente para ampliar cuota.
 
 Las credenciales, tokens, bases de datos, videos y compilaciones locales quedan
 excluidos del repositorio. No se incluyen datos personales de configuracion.

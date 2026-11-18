@@ -172,3 +172,21 @@ La galeria guarda una copia solo tras completar la carga correctamente y la
 identifica con fecha al usarla sin cuota. Nunca se usa esta copia para confirmar
 la presencia actual de un video ni para permitir borrados. La comprobacion de
 cuotas cuenta hasta el proximo intento previsto, no afirma cuota restante real.
+
+## Primera conexion
+
+`youtube_sync_setup.py` contiene el asistente Qt y no depende del modulo de la
+ventana principal. `initialize_session` lo abre solo cuando falta una carpeta o
+credencial configurada; los perfiles existentes mantienen su arranque normal.
+La autorizacion, consulta de canal, listas y avatar se ejecutan fuera del hilo Qt.
+
+`Store.import_oauth_json` admite clientes de escritorio con endpoints oficiales,
+guarda una copia gestionada por ID de cliente y conserva tokens compatibles y
+la pausa de cuota existente. La importacion no guarda por si misma la configuracion.
+El asistente usa un token temporal separado: la cuenta activa solo cambia al
+confirmar canal, carpeta y guardado. Un rechazo limpia la sesion temporal; si
+hay una autorizacion aun en curso, la limpieza se realiza cuando termine.
+
+No inicies un trabajador de subidas durante el asistente. Auto es una eleccion
+explicita y, tras el guardado, espera la comprobacion completa de YouTube.
+`pause_after_current` detiene tambien el resto del lote una vez termina el archivo.
