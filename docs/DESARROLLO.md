@@ -117,16 +117,22 @@ El `.gitignore` permite los directorios del proyecto y excluye entornos,
 compilaciones, JSON, tokens, bases de datos y registros. No anadas credenciales
 a los ejemplos ni a las pruebas. Revisa `git diff --cached` antes de publicar.
 
-## Versiones y actualizador futuro
+## Versiones y actualizaciones
 
-`APP_VERSION` en la interfaz define la version mostrada en Ajustes.
+`APP_VERSION` en `youtube_sync_version.py` define la version mostrada en Ajustes.
 La version actual es 1.0. Las mejoras posteriores permanecen en la seccion
 Sin publicar de [CHANGELOG.md](../CHANGELOG.md) hasta preparar otra version.
 
-El boton de actualizaciones actual esta deshabilitado. Todavia no hay consulta
-de releases, descarga, verificacion ni instalacion automatica. Una futura
-implementacion debe definir el origen de las versiones, comprobar integridad,
-gestionar el cierre y la sustitucion del ejecutable y preservar los datos del usuario.
+`youtube_sync_updater.py` consulta la API publica de Releases y descarga el ZIP
+Windows x64 con limites de tamano, HTTPS, origen fijado, verificacion SHA-256 y
+validacion del manifiesto/rutas. `youtube_sync_update_ui.py` ejecuta el trabajo
+fuera del hilo Qt y lo presenta en Ajustes. Cerrar Ajustes cancela la descarga.
+No se reutiliza el transporte OAuth ni los controles de cuota de YouTube.
+
+`scripts/create_release.py` comprueba el EXE real en modo self-test, contrasta su
+version y genera ZIP completo, manifiesto y checksum. El canal de actualizacion
+no instala ni ejecuta el paquete. El procedimiento de publicacion y sustitucion
+manual esta en [RELEASES.md](RELEASES.md).
 
 ## Convenciones
 

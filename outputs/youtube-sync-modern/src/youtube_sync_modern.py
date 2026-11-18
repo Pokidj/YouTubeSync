@@ -43,12 +43,13 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YouTubeSync"
-APP_VERSION = "1.0"
 ROOT = Path(__file__).resolve().parents[1]
 
 
 import youtube_sync_engine as engine
 from youtube_sync_setup import SetupWizard
+from youtube_sync_update_ui import UpdatePanel
+from youtube_sync_version import APP_VERSION
 
 
 def asset_path(name: str) -> Path:
@@ -196,18 +197,8 @@ class SettingsDialog(QWidget):
 
         app_section = tracked_section(general_layout, "Aplicacion", "version actualizacion updater")
         app_layout = app_section.layout()
-        version_row = QHBoxLayout()
-        version_label = QLabel(f"{APP_NAME} {APP_VERSION}")
-        version_label.setObjectName("CardValue")
-        updater_button = QPushButton("Buscar actualizaciones")
-        updater_button.setEnabled(False)
-        updater_button.setToolTip("Preparado para activar el actualizador en una version futura.")
-        version_row.addWidget(version_label, 1)
-        version_row.addWidget(updater_button, 0)
-        app_layout.addLayout(version_row)
-        updater_hint = QLabel("Actualizador preparado para una proxima version.")
-        updater_hint.setObjectName("Muted")
-        app_layout.addWidget(updater_hint)
+        self.update_panel = UpdatePanel(self.store.base, self)
+        app_layout.addWidget(self.update_panel)
 
         folder = tracked_section(general_layout, "Carpeta", "videos extensiones subcarpetas ruta")
         folder_layout = folder.layout()
@@ -321,6 +312,10 @@ class SettingsDialog(QWidget):
         label.setObjectName("SectionTitle")
         layout.addWidget(label)
         return frame
+
+    def closeEvent(self, event) -> None:
+        self.update_panel.shutdown()
+        super().closeEvent(event)
 
     def filter_settings_sections(self, query: str, tabs: QTabWidget) -> None:
         text = query.strip().casefold()
@@ -980,6 +975,8 @@ class MainWindow(QMainWindow):
 
     def stop_background_work(self) -> None:
         self._closing = True
+        if self.settings_dialog is not None:
+            self.settings_dialog.update_panel.shutdown()
         if self.setup_dialog is not None:
             self.setup_dialog.reject()
         if self.worker:
@@ -2187,7 +2184,7 @@ def main() -> None:
         preview.show()
         app.processEvents()
         preview.close()
-        Path(sys.argv[2]).write_text(json.dumps({"ok": True, "ui": "qt", "ssl": True}), encoding="utf-8")
+        Path(sys.argv[2]).write_text(json.dumps({"ok": True, "ui": "qt", "ssl": True, "version": APP_VERSION}), encoding="utf-8")
         return
     window = MainWindow()
     if window.config.start_minimized and QSystemTrayIcon.isSystemTrayAvailable():

@@ -5,6 +5,22 @@ asignarles una nueva version. La version mostrada por la app sigue siendo 1.0.
 
 ## Sin publicar
 
+### Actualizaciones desde GitHub Releases
+
+- Activado Buscar actualizaciones en Ajustes: consulta manual de la ultima
+  Release estable del repositorio publico, con comparacion numerica de versiones.
+- Descarga directa del paquete Windows x64, progreso y cancelacion, sin OAuth
+  de GitHub ni consumo de cuota de YouTube.
+- Verificacion de origen HTTPS, tamano, SHA-256 publicado, estructura y manifiesto
+  de version. No se ofrecen ZIP de codigo fuente ni paquetes parciales como app.
+- Notas de version y acceso a la carpeta descargada. La instalacion sigue siendo
+  manual para no sustituir binarios en uso ni tocar datos del usuario.
+- Version centralizada en `youtube_sync_version.py` y comando de empaquetado que
+  comprueba el EXE antes de crear el ZIP completo y su checksum.
+- Documentado el procedimiento para publicar, por ejemplo, v1.1 sin crear una
+  release ficticia ahora. La version actual permanece en 1.0.
+- Pruebas de metadatos, versiones, integridad, rutas ZIP, cancelacion, errores,
+  interfaz y generacion de paquetes sin datos personales.
 ### Primera conexion con credenciales propias
 
 - Asistente integrado de siete pasos: inicio, proyecto, API, credenciales,

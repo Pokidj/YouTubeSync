@@ -4,3 +4,4 @@ google-auth-oauthlib
 google-auth-httplib2
 httplib2
 pyinstaller
+packaging>=24.2

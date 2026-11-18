@@ -26,6 +26,7 @@ class ResponsiveLayoutTests(unittest.TestCase):
 
     def setUp(self):
         store = Mock()
+        store.base = ROOT / "work" / "layout-test-data"
         store.api_pause.return_value = None
         store.load_config.return_value = ui.engine.Config()
         with patch.object(ui.engine, "Store", return_value=store), \

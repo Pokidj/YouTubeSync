@@ -15,6 +15,7 @@ Version actual: **1.0**.
 - [Desarrollo y arquitectura](docs/DESARROLLO.md): estructura, ejecucion,
   compilacion, pruebas y mantenimiento.
 - [Historial de cambios](CHANGELOG.md).
+- [Publicar actualizaciones](docs/RELEASES.md): preparar y publicar los paquetes de GitHub Releases.
 
 ## Funciones
 
@@ -27,8 +28,9 @@ Version actual: **1.0**.
 - Ajustes por pestanas, bandeja del sistema e inicio con Windows configurable.
 - Primera conexion guiada, confirmacion del canal y credenciales propias por usuario.
 
-Las subidas y consultas estan sujetas a los limites de YouTube. El actualizador
-de Ajustes es una reserva para futuras versiones y todavia no esta operativo.
+Las subidas y consultas estan sujetas a los limites de YouTube. Desde Ajustes se
+pueden consultar Releases estables de GitHub y descargar paquetes verificados.
+La instalacion de esos paquetes sigue siendo manual; no se sustituye el EXE en uso.
 
 ## Desarrollo
 

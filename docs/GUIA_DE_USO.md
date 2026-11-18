@@ -144,8 +144,23 @@ antes de decidir que borrar. Edita un filtro para volver a la lista filtrada nor
 | Limpieza | Borrado automatico y tiempo de conservacion con unidad. |
 
 El buscador localiza secciones por palabras clave. Los cambios se aplican al
-pulsar Guardar. Buscar actualizaciones esta deshabilitado: es un espacio
-reservado y todavia no hay un actualizador operativo.
+pulsar Guardar.
+
+### Actualizaciones
+
+En General, pulsa **Buscar actualizaciones**. Se consulta la ultima Release
+estable de `Pokidj/YouTubeSync`, no los commits del repositorio. Si hay una version
+posterior con paquete Windows x64, puedes ver sus notas y descargarla con progreso
+y cancelacion. No utiliza el OAuth ni la cuota de YouTube.
+
+Solo se da por terminada una descarga cuyo tamano, SHA-256 publicado por GitHub
+y manifiesto de version coinciden. **Abrir carpeta** muestra el ZIP guardado.
+Cierra YouTubeSync por completo antes de extraerlo y sustituir la carpeta del
+programa completa, no solo el EXE. La configuracion y el registro permanecen en
+AppData. No hay instalacion automatica ni reinicio forzado.
+
+Si aun no hay ninguna Release estable publicada, la app lo indica. Las versiones
+en borrador, preliminares y el Source code ZIP de GitHub no se ofrecen como paquete.
 
 ## Bandeja y cierre
 
