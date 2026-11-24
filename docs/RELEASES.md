@@ -30,7 +30,7 @@ recursos de producto/versión. No permite renombrar una compilación antigua com
 ## Publicación automática
 
 El flujo `.github/workflows/release.yml` valida, compila y publica cuando cambia
-`src/youtube_sync_version.py` en `main`, cuando se incorpora el propio flujo o
+el código, pruebas o empaquetado en `main`, cuando se incorpora el propio flujo o
 al ejecutarlo manualmente desde Actions. Si la versión ya está publicada no la
 sobrescribe: para otra publicación hay que incrementar `APP_VERSION`.
 

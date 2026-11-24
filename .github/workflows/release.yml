@@ -5,7 +5,11 @@ on:
   push:
     branches: [main]
     paths:
-      - src/youtube_sync_version.py
+      - src/**
+      - tests/**
+      - scripts/**
+      - packaging/**
+      - requirements.txt
       - .github/workflows/release.yml
 
 permissions:

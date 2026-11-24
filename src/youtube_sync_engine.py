@@ -1842,7 +1842,7 @@ class SyncWorker(threading.Thread):
         self._client: YouTubeClient | None = None
         self._id_client: YouTubeClient | None = None
         self._client_config: str = ""
-        self._last_cleanup_at = 0.0
+        self._last_cleanup_at = float("-inf")
         self.operation_lock = threading.RLock()
         self._announced_reviews: set[str] = set()
 

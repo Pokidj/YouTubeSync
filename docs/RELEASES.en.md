@@ -30,7 +30,7 @@ older build as a new version.
 ## Automatic Publication
 
 `.github/workflows/release.yml` validates, builds and publishes when
-`src/youtube_sync_version.py` changes on `main`, the workflow itself is introduced,
+source, tests or packaging change on `main`, the workflow itself is introduced,
 or it is manually dispatched in Actions. Published versions are never overwritten;
 increment `APP_VERSION` for a new release.
 

@@ -161,10 +161,20 @@ class ReconciliationTests(unittest.TestCase):
         client = Mock()
         client.verify_local_file.return_value = (True, "remote-id", "Confirmado", "processed")
         with patch.object(self.store, "uploaded_before", return_value=[row]), \
-                patch.object(engine, "YouTubeClient", return_value=client):
+                patch.object(engine, "YouTubeClient", return_value=client), \
+                patch.object(engine.time, "monotonic", return_value=1.0):
             worker.auto_cleanup_once()
         client.uploaded_video_index.assert_called_once_with(force=True, video_ids=["remote-id"])
         self.assertFalse(self.path.exists())
+
+    def test_auto_cleanup_first_run_is_not_delayed_by_system_uptime(self):
+        self.config.auto_delete_uploaded = True
+        worker = engine.SyncWorker(self.store, lambda: self.config, queue.Queue())
+        with patch.object(engine.time, "monotonic", return_value=1.0), \
+                patch.object(self.store, "uploaded_before", return_value=[]) as candidates:
+            worker.auto_cleanup_once()
+            worker.auto_cleanup_once()
+        candidates.assert_called_once()
 
     def test_auto_cleanup_preserves_a_file_changed_during_remote_verification(self):
         self.store.remember_upload(self.signature, self.path, "Video", "remote-id", "uploaded")
