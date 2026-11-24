@@ -42,7 +42,7 @@ class InstallerTests(unittest.TestCase):
         with patch.object(install.subprocess, "Popen") as process:
             install.launch_installer(plan, "en", pid=1234)
         command = process.call_args.args[0]
-        self.assertEqual(Path(command[0]), self.path)
+        self.assertTrue(Path(command[0]).samefile(self.path))
         for argument in ("/UPDATEPID=1234", "/NORESTART", "/NOCLOSEAPPLICATIONS", "/LANG=english", "/RELAUNCH=1"):
             self.assertIn(argument, command)
         self.assertNotIn("/FORCECLOSEAPPLICATIONS", command)
