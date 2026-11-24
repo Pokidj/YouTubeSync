@@ -28,6 +28,8 @@ class ResponsiveLayoutTests(unittest.TestCase):
         store = Mock()
         store.base = ROOT / "work" / "layout-test-data"
         store.api_pause.return_value = None
+        store.retry_required_signatures.return_value = set()
+        store.pending_upload_reviews.return_value = {}
         store.load_config.return_value = ui.engine.Config()
         with patch.object(ui.engine, "Store", return_value=store), \
                 patch.object(ui.MainWindow, "build_tray"), \
@@ -108,7 +110,7 @@ class ResponsiveLayoutTests(unittest.TestCase):
             self.window.events.put(("log", f"Log {index}"))
         self.window.process_events()
         self.assertEqual(self.window.events.qsize(), 150)
-        self.assertLessEqual(self.window.console.document().maximumBlockCount(), 2000)
+        self.assertLessEqual(len(self.window.diagnostic_buffer.entries), 2000)
 
     def test_settings_reuses_open_window(self):
         self.window.open_settings()
@@ -125,7 +127,26 @@ class ResponsiveLayoutTests(unittest.TestCase):
             self.window.retry_selected_video()
         selected.assert_called_once()
         queue_video.assert_called_once_with(item)
+
+    def test_manual_queue_authorizes_a_single_explicit_retry(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
+            path = Path(temporary) / "video.mp4"
+            path.write_bytes(b"video")
+            with patch.object(self.window, "start_worker") as start:
+                self.window.queue_video({"path": str(path), "signature": "signature", "status": "Incidencia"})
         self.window.store.clear_upload_incident.assert_called_once_with("signature")
+        start.assert_called_once_with(manual_path=path)
+
+    def test_clicking_upload_on_the_active_file_does_not_authorize_another_attempt(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
+            path = Path(temporary) / "video.mp4"
+            path.write_bytes(b"video")
+            self.window.worker = Mock(active_path=path)
+            with patch.object(ui.QMessageBox, "information"), patch.object(self.window, "start_worker") as start:
+                self.window.queue_video({"path": str(path), "signature": "signature", "status": "En curso"})
+        self.window.store.clear_upload_incident.assert_not_called()
+        start.assert_not_called()
+        self.window.worker = None
 
     def test_selected_video_is_queued_before_a_new_worker_starts(self):
         worker = Mock()
@@ -160,7 +181,21 @@ class ResponsiveLayoutTests(unittest.TestCase):
         with patch.object(self.window, "check_youtube") as check:
             self.window.update_quota_status()
             self.window.update_quota_status()
-        check.assert_called_once_with(full=True)
+        check.assert_called_once_with(full=False)
+
+    def test_background_check_does_not_probe_channel_when_there_is_nothing_to_verify(self):
+        client = Mock()
+        with patch.object(ui.engine, "YouTubeClient", return_value=client), \
+                patch.object(ui.engine, "reconcile_local_uploads", return_value=0):
+            self.window._check_youtube_thread(full=False)
+        client.channel_info.assert_not_called()
+
+    def test_successful_connection_clears_stale_quota_notice(self):
+        self.window.api_pause_state = {"kind": "proyecto", "retry_at": "2099-01-01T00:00:00+00:00"}
+        self.window.events.put(("youtube", {"title": "Mi canal"}))
+        self.window.process_events()
+        self.assertIsNone(self.window.api_pause_state)
+        self.assertNotIn("cuota", self.window.status.text().lower())
 
     def test_local_actions_receive_the_persisted_youtube_id(self):
         self.window.video_table.setRowCount(1)

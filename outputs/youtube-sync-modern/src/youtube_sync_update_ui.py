@@ -7,12 +7,14 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton, QStyle, QTextEdit,
+    QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
 from youtube_sync_updater import DownloadCancelled, ReleaseClient, RELEASES_URL
 from youtube_sync_version import APP_VERSION
+from youtube_sync_icons import app_icon
+from youtube_sync_i18n_widgets import QDialog, QLabel, QPushButton, QWidget
 
 
 class UpdateSignals(QObject):
@@ -46,7 +48,7 @@ class UpdatePanel(QWidget):
         version.setObjectName("CardValue")
         row.addWidget(version, 1)
         self.check_button = QPushButton("Buscar actualizaciones")
-        self.check_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        self.check_button.setIcon(app_icon("refresh-cw"))
         self.check_button.clicked.connect(self.check)
         row.addWidget(self.check_button)
         layout.addLayout(row)
@@ -63,22 +65,22 @@ class UpdatePanel(QWidget):
         actions = QHBoxLayout(self.actions)
         actions.setContentsMargins(0, 0, 0, 0)
         self.download_button = QPushButton("Descargar")
-        self.download_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
+        self.download_button.setIcon(app_icon("download"))
         self.download_button.setObjectName("PrimaryButton")
         self.download_button.clicked.connect(self.download)
         self.cancel_button = QPushButton("Cancelar")
-        self.cancel_button.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
+        self.cancel_button.setIcon(app_icon("square"))
         self.cancel_button.clicked.connect(self.cancel.set)
         self.cancel_button.hide()
         self.notes_button = QPushButton("Notas")
-        self.notes_button.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
+        self.notes_button.setIcon(app_icon("file-text"))
         self.notes_button.clicked.connect(self.show_notes)
         self.open_button = QPushButton("Abrir carpeta")
-        self.open_button.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
+        self.open_button.setIcon(app_icon("folder-open"))
         self.open_button.clicked.connect(self.open_folder)
         self.open_button.hide()
         release_button = QPushButton("GitHub")
-        release_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowForward))
+        release_button.setIcon(app_icon("external-link"))
         release_button.clicked.connect(lambda: webbrowser.open(self.release.url if self.release else RELEASES_URL))
         for button in (self.download_button, self.cancel_button, self.notes_button, self.open_button):
             actions.addWidget(button)
@@ -201,6 +203,7 @@ class UpdatePanel(QWidget):
         notes.setPlainText(self.release.notes)
         layout.addWidget(notes)
         close = QPushButton("Cerrar")
+        close.setIcon(app_icon("x"))
         close.clicked.connect(dialog.accept)
         layout.addWidget(close)
         dialog.exec()

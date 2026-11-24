@@ -1,5 +1,18 @@
 # Desarrollo y mantenimiento
 
+**Español** | [English](DEVELOPMENT.en.md)
+
+## Idiomas
+
+`Config.language` admite `es` (predeterminado) y `en`; valores desconocidos vuelven
+a español. Se elige en Ajustes > General y se aplica al abrir de nuevo la app.
+`youtube_sync_i18n.py` y `youtube_sync_translations.py` contienen el catálogo;
+`youtube_sync_i18n_widgets.py` adapta la presentación Qt sin traducir los valores
+del modelo. Los estados persistidos, claves, firmas, ID, títulos, rutas y nombres
+de listas no cambian. Los diagnósticos se clasifican y redactan antes de traducir.
+Las tablas traducen cabeceras y estados al dibujarse; los combos de enumeraciones
+conservan los valores canónicos. Las pruebas de idioma cubren estos contratos.
+
 ## Requisitos
 
 - Windows y Python 3.12.
@@ -33,6 +46,13 @@ La interfaz importa directamente `youtube_sync_engine` desde su propio proyecto.
 No hay carga dinamica de archivos de la aplicacion anterior. `archive` conserva
 la copia historica y no forma parte de la compilacion ni de las pruebas activas.
 El proyecto moderno no necesita Tkinter, Pillow ni pystray.
+
+La compilacion activa se conserva completa en `dist/YouTubeSync`, incluido
+`_internal`. El entorno `.venv` activo se utiliza para desarrollar y recompilar.
+Las carpetas de pruebas temporales, caches `__pycache__`, `build` y paquetes de
+releases antiguas son regenerables. No mezcles sus ejecutables con la distribucion
+actual. Los datos recuperados durante la limpieza se guardan aparte en
+`archive/local-data`, fuera de Git; los datos activos siguen en AppData.
 
 Las operaciones de red se delegan a hilos y devuelven resultados a la interfaz
 mediante senales o la cola de eventos. La tabla del canal se rellena por lotes.
@@ -92,6 +112,7 @@ La interfaz Qt se compila con `outputs/youtube-sync-modern/packaging/YouTubeSync
 Esta especificacion excluye la `icuuc.dll` que otras herramientas pueden anadir
 a PATH; Qt debe usar la API ICU de Windows. No sustituyas la compilacion por
 un comando generico de PyInstaller que pierda esta exclusion.
+Se empaqueta también la traducción base de Qt al español para los botones nativos.
 
 Despues de compilar, comprueba el ejecutable real desde su carpeta `dist`:
 
@@ -141,6 +162,8 @@ manual esta en [RELEASES.md](RELEASES.md).
 - Manten las operaciones de YouTube fuera del hilo de la interfaz.
 - Distingue registro local, transferencia y procesamiento remoto en estados y mensajes.
 - Documenta cambios de comportamiento y limitaciones comprobadas en el changelog.
+- Añade los mensajes nuevos al catálogo inglés, sin traducir estados guardados
+  ni nombres definidos por el usuario.
 
 ## Identidad y conciliacion
 
@@ -157,7 +180,7 @@ se contrastan tambien con nombre original y tamano. Titulo, fecha y duracion
 iguales nunca bastan para confirmar una correspondencia. Un video sin evidencia
 suficiente requiere revision en Canal; no se confirma ni se borra automaticamente.
 
-La conciliacion completa se hace al abrir o actualizar. La periodica consulta solo
+La conciliacion omite los confirmados sin cambios. La periodica consulta solo
 IDs pendientes de resolver en lotes de 50. Las huellas se calculan en bloques y se
 cachean por ruta, tamano y marcas de tiempo para no releer clips sin cambios.
 

@@ -13,6 +13,9 @@ engine = ui.engine
 
 class QuotaTests(unittest.TestCase):
     def setUp(self):
+        duration = patch.object(engine, "local_video_duration", return_value=60.0)
+        duration.start()
+        self.addCleanup(duration.stop)
         self.temporary = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1])
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
@@ -96,8 +99,12 @@ class QuotaTests(unittest.TestCase):
                 self.store.upsert(signature, self.path, "Video", reason, youtube_id="remote-id")
                 client = Mock()
                 client.uploaded_video_index.side_effect = self.error()
-                with self.assertRaises(engine.HttpError):
+                if reason == "processing":
+                    with self.assertRaises(engine.HttpError):
+                        engine.reconcile_local_uploads(self.store, self.config, client, full=True)
+                else:
                     engine.reconcile_local_uploads(self.store, self.config, client, full=True)
+                    client.uploaded_video_index.assert_not_called()
                 self.assertEqual(self.store.upload_status(signature), reason)
                 self.assertEqual(self.store.upload_identity(signature)[1], "remote-id")
 
@@ -107,6 +114,13 @@ class QuotaTests(unittest.TestCase):
         self.assertIs(worker.available_client(self.config), first)
         self.config.privacy_status = "unlisted"
         self.assertIsNot(worker.available_client(self.config), first)
+
+    def test_server_quota_reason_is_available_in_diagnostics(self):
+        events = queue.Queue()
+        worker = engine.SyncWorker(self.store, lambda: self.config, events)
+        worker.pause_for_youtube_limit(self.error())
+        messages = [value for kind, value in list(events.queue) if kind == "log"]
+        self.assertTrue(any("quotaExceeded" in message and "HttpError" in message for message in messages))
 
     def test_index_cache_avoids_repeated_full_channel_scans(self):
         client = engine.YouTubeClient(self.store, self.config, Mock())
@@ -183,6 +197,98 @@ class QuotaTests(unittest.TestCase):
         kind, retry, _ = engine.youtube_retry_prediction(self.error("rateLimitExceeded"))
         self.assertEqual(kind, "api")
         self.assertLess((retry - datetime.now().astimezone()).total_seconds(), 65)
+
+    def test_daily_upload_limit_reported_as_rate_limit_uses_daily_reset(self):
+        error = self.error("rateLimitExceeded", "Quota exceeded for quota metric Video Uploads and limit Video Uploads per day")
+        kind, retry, _ = engine.youtube_retry_prediction(error)
+        self.assertEqual(kind, "proyecto")
+        self.assertEqual(retry, engine.next_pacific_midnight())
+        self.assertIn("diaria", engine.youtube_error_message(error))
+
+    def test_quota_exceeded_with_a_per_minute_limit_is_not_treated_as_daily(self):
+        error = self.error("quotaExceeded", "Quota exceeded for Queries per minute")
+        self.assertEqual(engine.youtube_retry_prediction(error)[0], "api")
+
+    def test_repeated_temporary_limits_back_off_instead_of_polling_every_minute(self):
+        error = self.error("rateLimitExceeded")
+        first = self.store.defer_api(self.scope, error)
+        self.store.clear_api_pause(self.scope)
+        second = self.store.defer_api(self.scope, error)
+        self.assertEqual(second["attempts"], 2)
+        self.assertGreater(datetime.fromisoformat(second["retry_at"]), datetime.fromisoformat(first["retry_at"]))
+        same = self.store.defer_api(self.scope, engine.ApiQuotaUnavailable(second))
+        self.assertEqual(same, second)
+        self.assertEqual(second["reason"], "rateLimitExceeded")
+        self.assertIn("temporal", engine.youtube_error_message(engine.ApiQuotaUnavailable(second)))
+
+    def test_shared_cache_coalesces_simultaneous_background_checks(self):
+        import threading
+        import time
+        service = Mock()
+        service.videos.return_value.list.return_value.execute.side_effect = lambda: (time.sleep(0.02) or {"items": []})
+        failures = []
+
+        def run():
+            try:
+                engine.YouTubeClient(self.store, self.config, Mock()).uploaded_video_index(video_ids=["known-id"])
+            except Exception as exc:
+                failures.append(exc)
+
+        with patch.object(engine.YouTubeClient, "service", return_value=service), \
+                patch.object(engine.YouTubeClient, "channel_info", return_value={"id": "owner"}):
+            threads = [threading.Thread(target=run) for _ in range(6)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+        self.assertEqual(failures, [])
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        service.videos.return_value.list.assert_called_once()
+
+    def test_expired_and_invalid_pauses_are_discarded(self):
+        for retry in ("2000-01-01T00:00:00+00:00", "not-a-date", "2026-01-01"):
+            self.store.save_service_cache(self.scope, "quota_general", {"retry_at": retry})
+            self.assertIsNone(self.store.api_pause(self.scope))
+            self.assertIsNone(self.store.service_cache(self.scope, "quota_general"))
+
+    def test_throttling_without_a_named_quota_is_temporary(self):
+        error = self.error("", "Too many requests", 429)
+        self.assertTrue(engine.is_youtube_quota_error(error))
+        self.assertEqual(engine.youtube_retry_prediction(error)[0], "api")
+
+    def test_check_cache_is_shared_between_clients_but_forced_checks_are_live(self):
+        first = engine.YouTubeClient(self.store, self.config, Mock())
+        second = engine.YouTubeClient(self.store, self.config, Mock())
+        service = Mock()
+        service.videos.return_value.list.return_value.execute.return_value = {"items": []}
+        for client in (first, second):
+            with patch.object(client, "service", return_value=service), \
+                    patch.object(client, "channel_info", return_value={"id": "owner"}):
+                client.uploaded_video_index(video_ids=["known-id"])
+        self.assertEqual(service.videos.return_value.list.call_count, 1)
+        with patch.object(second, "service", return_value=service), \
+                patch.object(second, "channel_info", return_value={"id": "owner"}):
+            second.uploaded_video_index(force=True, video_ids=["known-id"])
+        self.assertEqual(service.videos.return_value.list.call_count, 2)
+
+    def test_automatic_scan_does_not_repeat_checks_without_new_identity_evidence(self):
+        signature = engine.file_signature(self.path)
+        self.store.upsert(signature, self.path, "Video", "verification_pending", youtube_id="known-id")
+        worker = engine.SyncWorker(self.store, lambda: self.config, queue.Queue())
+        with patch.object(worker, "is_stable", return_value=True):
+            self.assertEqual(list(worker.iter_videos(self.base, self.config)), [])
+
+    def test_shared_cache_is_not_reused_after_account_authorization_changes(self):
+        service = Mock()
+        service.videos.return_value.list.return_value.execute.return_value = {"items": []}
+        with patch.object(engine.YouTubeClient, "service", return_value=service), \
+                patch.object(engine.YouTubeClient, "channel_info", return_value={"id": "owner"}):
+            first = engine.YouTubeClient(self.store, self.config, Mock())
+            first.uploaded_video_index(video_ids=["known-id"])
+            first.token_path.write_text("new-authorization")
+            second = engine.YouTubeClient(self.store, self.config, Mock())
+            second.uploaded_video_index(video_ids=["known-id"])
+        self.assertEqual(service.videos.return_value.list.call_count, 2)
 
     def test_channel_can_use_a_persisted_snapshot_without_verifying_it_again(self):
         snapshot = {"videos": [{"id": "remote-id", "title": "Video"}], "playlists": []}

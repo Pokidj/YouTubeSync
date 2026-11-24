@@ -95,7 +95,7 @@ class ReceiptTests(unittest.TestCase):
         self.service.videos.return_value.insert.return_value.next_chunk.assert_not_called()
 
     def test_file_changed_during_transfer_is_not_confirmed(self):
-        def changed():
+        def changed(**kwargs):
             self.path.write_bytes(b"changed while uploading")
             return None, {"id": "received-id"}
         self.service.videos.return_value.insert.return_value.next_chunk.side_effect = changed

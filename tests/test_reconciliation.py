@@ -117,6 +117,72 @@ class ReconciliationTests(unittest.TestCase):
                                                           is_active=lambda path: path == self.path), 0)
         verify.assert_not_called()
 
+    def test_confirmations_remain_permanent_even_on_full_refresh(self):
+        self.store.remember_upload(self.signature, self.path, "Video", "remote-id", "uploaded")
+        self.store.upsert(self.signature, self.path, "Video", "uploaded", youtube_id="remote-id")
+        for full in (False, True):
+            with patch.object(self.client, "uploaded_video_index") as index, \
+                    patch.object(self.client, "verify_local_file") as verify:
+                self.assertEqual(engine.reconcile_local_uploads(self.store, self.config, self.client, full=full), 0)
+            index.assert_not_called()
+            verify.assert_not_called()
+        self.assertTrue(self.store.has_success(self.signature))
+
+    def test_absent_local_files_do_not_trigger_a_remote_query(self):
+        self.remember_processing()
+        self.path.unlink()
+        with patch.object(self.client, "uploaded_video_index") as index:
+            self.assertEqual(engine.reconcile_local_uploads(self.store, self.config, self.client, full=True), 0)
+        index.assert_not_called()
+
+    def test_full_refresh_with_known_ids_only_requests_those_ids(self):
+        self.remember_processing()
+        self.index({}, {})
+        with patch.object(self.client, "uploaded_video_index") as index:
+            engine.reconcile_local_uploads(self.store, self.config, self.client, full=True)
+        index.assert_called_once_with(video_ids=["remote-id"])
+
+    def test_idle_auto_worker_keeps_confirmed_files_without_network(self):
+        self.store.remember_upload(self.signature, self.path, "Video", "remote-id", "uploaded")
+        worker = engine.SyncWorker(self.store, lambda: self.config, queue.Queue())
+        worker.set_enabled(True)
+        client = Mock()
+        client.scope = "scope"
+        with patch.object(worker, "available_client", return_value=client):
+            worker.scan_once()
+        client.uploaded_titles.assert_not_called()
+        client.uploaded_video_index.assert_not_called()
+
+    def test_auto_cleanup_checks_exact_ids_live_before_deleting(self):
+        self.store.remember_upload(self.signature, self.path, "Video", "remote-id", "uploaded")
+        self.config.auto_delete_uploaded = True
+        row = (self.signature, "2000-01-01", "uploaded", "Video", str(self.path), "remote-id", "", 13)
+        worker = engine.SyncWorker(self.store, lambda: self.config, queue.Queue())
+        client = Mock()
+        client.verify_local_file.return_value = (True, "remote-id", "Confirmado", "processed")
+        with patch.object(self.store, "uploaded_before", return_value=[row]), \
+                patch.object(engine, "YouTubeClient", return_value=client):
+            worker.auto_cleanup_once()
+        client.uploaded_video_index.assert_called_once_with(force=True, video_ids=["remote-id"])
+        self.assertFalse(self.path.exists())
+
+    def test_auto_cleanup_preserves_a_file_changed_during_remote_verification(self):
+        self.store.remember_upload(self.signature, self.path, "Video", "remote-id", "uploaded")
+        self.config.auto_delete_uploaded = True
+        row = (self.signature, "2000-01-01", "uploaded", "Video", str(self.path), "remote-id", "", 13)
+        worker = engine.SyncWorker(self.store, lambda: self.config, queue.Queue())
+        client = Mock()
+
+        def changed(*args):
+            self.path.write_bytes(b"changed during verification")
+            return True, "remote-id", "Confirmado", "processed"
+
+        client.verify_local_file.side_effect = changed
+        with patch.object(self.store, "uploaded_before", return_value=[row]), \
+                patch.object(engine, "YouTubeClient", return_value=client):
+            worker.auto_cleanup_once()
+        self.assertTrue(self.path.exists())
+
     def test_retry_clears_error_without_losing_remote_identity(self):
         self.store.upsert(self.signature, self.path, "Video", "error", youtube_id="remote-id", error="Red")
         self.store.clear_upload_incident(self.signature)

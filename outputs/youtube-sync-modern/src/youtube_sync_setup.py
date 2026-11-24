@@ -12,10 +12,12 @@ from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-    QProgressBar, QPushButton, QScrollArea, QStackedWidget, QStyle, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 import youtube_sync_engine as engine
+from youtube_sync_icons import app_icon
+from youtube_sync_i18n_widgets import QCheckBox, QComboBox, QDialog, QFileDialog, QLabel, QLineEdit, QPushButton, QWidget
 
 
 class SetupSignals(QObject):
@@ -77,7 +79,7 @@ class SetupWizard(QDialog):
         welcome = self.page("Conecta tu canal")
         self.paragraph(welcome, "Cuenta de Google / Proyecto propio de Google Cloud")
         existing = QPushButton("Ya tengo mi JSON OAuth")
-        existing.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        existing.setIcon(app_icon("key-round"))
         existing.clicked.connect(lambda: self.go(4))
         welcome.addWidget(existing, alignment=Qt.AlignLeft)
         welcome.addStretch(1)
@@ -85,7 +87,7 @@ class SetupWizard(QDialog):
             page = self.page(title)
             self.paragraph(page, body)
             button = QPushButton(action)
-            button.setIcon(self.style().standardIcon(QStyle.SP_ArrowForward))
+            button.setIcon(app_icon("external-link"))
             button.clicked.connect(lambda _checked=False, url=url: webbrowser.open(url))
             page.addWidget(button, alignment=Qt.AlignLeft)
             if title == "Prepara las credenciales":
@@ -98,7 +100,7 @@ class SetupWizard(QDialog):
         self.credential_label = self.paragraph(connection, "Ningun JSON seleccionado")
         self.credential_label.setObjectName("Muted")
         self.import_button = QPushButton("Seleccionar JSON de escritorio")
-        self.import_button.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        self.import_button.setIcon(app_icon("key-round"))
         self.import_button.clicked.connect(self.pick_json)
         connection.addWidget(self.import_button, alignment=Qt.AlignLeft)
         self.paragraph(connection, "Autorizacion en el navegador oficial de Google. No se solicita tu contrasena en esta ventana.")
@@ -128,7 +130,7 @@ class SetupWizard(QDialog):
         self.folder.setPlaceholderText("Selecciona una carpeta existente")
         folder_row.addWidget(self.folder, 1)
         pick = QPushButton("Elegir")
-        pick.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
+        pick.setIcon(app_icon("folder-open"))
         pick.clicked.connect(self.pick_folder)
         folder_row.addWidget(pick)
         options.addLayout(folder_row)
@@ -143,6 +145,7 @@ class SetupWizard(QDialog):
         options.addWidget(self.privacy)
         self.paragraph(options, "Lista de reproduccion")
         self.playlist = QComboBox()
+        self.playlist.setProperty("translatedItemCount", 1)
         self.playlist.addItem("Sin lista", "")
         options.addWidget(self.playlist)
         self.auto = QCheckBox("Subir automaticamente")
@@ -164,7 +167,7 @@ class SetupWizard(QDialog):
         self.later = QPushButton("Configurar mas tarde")
         self.later.clicked.connect(self.reject)
         self.back = QPushButton("Anterior")
-        self.back.setIcon(self.style().standardIcon(QStyle.SP_ArrowBack))
+        self.back.setIcon(app_icon("arrow-left"))
         self.back.clicked.connect(lambda: self.go(self.pages.currentIndex() - 1))
         self.next = QPushButton()
         self.next.setObjectName("PrimaryButton")
@@ -209,6 +212,7 @@ class SetupWizard(QDialog):
         self.back.setEnabled(index > 0 and not self._busy)
         self.import_button.setEnabled(not self._busy)
         self.next.setText({0: "Conectar mi canal", 4: "Conectar con Google", 5: "Configurar carpeta", 6: "Guardar y finalizar"}.get(index, "Siguiente"))
+        self.next.setIcon(app_icon("circle-check" if index == 6 else "key-round" if index in {0, 4} else "arrow-right"))
         ready = (bool(self.config.client_secret_path) if index == 4 else
                  bool(self.channel and self.confirm_channel.isChecked()) if index == 5 else True)
         self.next.setEnabled(ready and not self._busy)
@@ -296,7 +300,7 @@ class SetupWizard(QDialog):
         self._busy = False
         self.busy.hide()
         self.channel = result["info"]
-        self.channel_name.setText(self.channel.get("title", "Canal de YouTube"))
+        self.channel_name.setRawText(self.channel.get("title", "Canal de YouTube"))
         self.channel_id.setText(self.channel["id"])
         self.confirm_channel.setChecked(False)
         pixmap = QPixmap()

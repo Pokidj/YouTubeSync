@@ -1,6 +1,7 @@
 """Backend for the Qt application: storage, OAuth, YouTube and synchronization."""
 
 import hashlib
+import math
 from contextlib import closing, contextmanager
 
 
@@ -26,6 +27,7 @@ import sys
 
 
 import threading
+import traceback
 
 
 import tempfile
@@ -34,7 +36,8 @@ import tempfile
 import time
 
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from youtube_sync_library import DEFAULT_LIBRARY_COLUMNS, normalize_library_columns
 
 
 from datetime import datetime, timedelta, timezone
@@ -128,6 +131,8 @@ def describe_error(exc: Exception) -> str:
 def is_youtube_quota_error(exc: Exception) -> bool:
     if isinstance(exc, ApiQuotaUnavailable):
         return True
+    if getattr(getattr(exc, "resp", None), "status", None) == 429:
+        return True
     text = str(exc).lower()
     return (
         "quota exceeded" in text
@@ -146,7 +151,8 @@ def is_youtube_quota_error(exc: Exception) -> bool:
 class ApiQuotaUnavailable(RuntimeError):
     def __init__(self, state: dict) -> None:
         self.state = state
-        super().__init__("Cuota API agotada. Proxima comprobacion: " + state["retry_at"])
+        label = "Limite temporal API" if state.get("kind") == "api" else "Cuota API agotada"
+        super().__init__(label + ". Proximo intento: " + state["retry_at"])
 
 
 def api_scope(client_secret_path: str) -> str:
@@ -166,6 +172,8 @@ def youtube_error_message(exc: Exception) -> str:
             "o usa otro canal con permiso real para subir."
         )
     if is_youtube_quota_error(exc):
+        if youtube_retry_prediction(exc)[0] == "api":
+            return "Limite temporal de peticiones de YouTube. Se reintentara sin modificar los estados de los videos."
         return (
             "Cuota diaria de YouTube Data API agotada para este proyecto de Google. "
             "No es un fallo del video: YouTube no aceptara nuevas peticiones hasta que se renueve la cuota "
@@ -175,6 +183,9 @@ def youtube_error_message(exc: Exception) -> str:
 
 
 def youtube_retry_prediction(exc: Exception) -> tuple[str, datetime, str]:
+    if isinstance(exc, ApiQuotaUnavailable):
+        state = exc.state
+        return state["kind"], datetime.fromisoformat(state["retry_at"]), state["source"]
     now = datetime.now().astimezone()
     response = getattr(exc, "resp", None)
     retry_after = None
@@ -196,7 +207,14 @@ def youtube_retry_prediction(exc: Exception) -> tuple[str, datetime, str]:
     if is_youtube_channel_upload_limit(exc):
         return "canal", now + timedelta(hours=24), "ventana estimada de 24 h"
 
-    if "ratelimitexceeded" in str(exc).lower():
+    text = str(exc).lower()
+    # Google can report rateLimitExceeded for the daily Video Uploads bucket.
+    if any(value in text for value in ("per minute", "per_minute", "perminute", "per second", "per_second", "persecond")):
+        return "api", now + timedelta(minutes=1), "reintento conservador tras limite temporal"
+    if any(value in text for value in ("per day", "per_day", "perday", "dailylimitexceeded", "quotaexceeded")):
+        return "proyecto", next_pacific_midnight(now), "reinicio diario estimado de la cuota del proyecto"
+
+    if "ratelimitexceeded" in text or getattr(response, "status", None) == 429:
         return "api", now + timedelta(minutes=1), "reintento conservador tras limite temporal"
 
     return "proyecto", next_pacific_midnight(now), "reinicio diario estimado de la cuota del proyecto"
@@ -255,6 +273,15 @@ def file_signature(path: Path) -> str:
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
 
 
+def local_video_duration(path: Path) -> float | None:
+    from youtube_sync_local_media import windows_media
+    try:
+        seconds = float(windows_media(path, None).get("seconds", 0))
+        return seconds if math.isfinite(seconds) and seconds > 0 else None
+    except Exception:
+        return None
+
+
 _fingerprint_cache: dict[tuple, str] = {}
 
 
@@ -286,7 +313,9 @@ def file_content_fingerprint(path: Path) -> str:
 _full_fingerprint_cache: dict[tuple, str] = {}
 
 
-def full_content_fingerprint(path: Path) -> str:
+def full_content_fingerprint(path: Path, cancelled: Callable[[], bool] | None = None) -> str:
+    if cancelled and cancelled():
+        raise OSError("Operación cancelada")
     before = path.stat()
     key = (str(path.resolve()), before.st_size, before.st_mtime_ns, before.st_ctime_ns)
     if key in _full_fingerprint_cache:
@@ -294,6 +323,8 @@ def full_content_fingerprint(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
         for chunk in iter(lambda: source.read(4 * 1024 * 1024), b""):
+            if cancelled and cancelled():
+                raise OSError("Operación cancelada")
             digest.update(chunk)
     after = path.stat()
     if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
@@ -392,6 +423,7 @@ def set_run_at_startup(enabled: bool) -> None:
 
 @dataclass
 class Config:
+    language: str = "es"
     watch_folder: str = ""
     client_secret_path: str = ""
     privacy_status: str = "private"
@@ -412,6 +444,7 @@ class Config:
     auto_delete_after_unit: str = "horas"
     connected_channel_id: str = ""
     connected_channel_name: str = ""
+    library_columns: list[str] = field(default_factory=lambda: list(DEFAULT_LIBRARY_COLUMNS))
 
     @property
     def extension_set(self) -> set[str]:
@@ -559,6 +592,28 @@ class Store:
                 """
             )
             db.execute("CREATE INDEX IF NOT EXISTS idx_upload_attempts_created ON upload_attempts(created_at)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_upload_attempts_signature ON upload_attempts(signature)")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(upload_attempts)")}
+            for name in ("outcome", "detail"):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE upload_attempts ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+            db.execute("""CREATE TABLE IF NOT EXISTS upload_retry_permissions (
+                       signature TEXT PRIMARY KEY, after_attempt_id INTEGER NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS manual_confirmations (
+                       signature TEXT PRIMARY KEY, youtube_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
+                       size INTEGER NOT NULL, channel_id TEXT NOT NULL, confirmed_at TEXT NOT NULL)""")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_manual_youtube ON manual_confirmations(youtube_id)")
+            db.execute("""CREATE TABLE IF NOT EXISTS rejected_matches (
+                       signature TEXT NOT NULL, youtube_id TEXT NOT NULL, rejected_at TEXT NOT NULL,
+                       PRIMARY KEY(signature,youtube_id))""")
+            db.execute("""CREATE TABLE IF NOT EXISTS fresh_upload_permissions (
+                       signature TEXT PRIMARY KEY, after_attempt_id INTEGER NOT NULL)""")
+            db.execute("""UPDATE uploads SET status='error',
+                       error='Intento anterior sin confirmar. Revisa el canal y pulsa Reintentar.'
+                       WHERE status='pending' AND signature IN (
+                           SELECT a.signature FROM upload_attempts a
+                           LEFT JOIN upload_retry_permissions p ON p.signature=a.signature
+                           GROUP BY a.signature HAVING MAX(a.id)>COALESCE(MAX(p.after_attempt_id),0))""")
             db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS upload_limit_state (
@@ -590,6 +645,42 @@ class Store:
                        ON CONFLICT(scope,name) DO UPDATE SET payload=excluded.payload, checked_at=excluded.checked_at""",
                        (scope, name, json.dumps(payload), datetime.now().astimezone().isoformat()))
 
+    def review_before_upload(self, path: Path) -> dict:
+        signature = file_signature(path)
+        saved = self.service_cache("upload_review", signature)
+        if saved and isinstance(saved["data"], dict) and type(saved["data"].get("approved")) is bool:
+            seconds = saved["data"].get("seconds")
+            if seconds is None or (type(seconds) in (int, float) and math.isfinite(seconds) and seconds > 0):
+                return dict(saved["data"], signature=signature)
+        seconds = local_video_duration(path)
+        if file_signature(path) != signature:
+            raise OSError("El archivo ha cambiado al leer su duración")
+        review = {"path": str(path), "seconds": seconds, "approved": seconds is not None and seconds >= 30}
+        self.save_service_cache("upload_review", signature, review)
+        return dict(review, signature=signature)
+
+    def pending_upload_reviews(self) -> dict:
+        with self._connection() as db:
+            rows = db.execute("SELECT name,payload FROM service_cache WHERE scope='upload_review'").fetchall()
+        result = {}
+        for signature, payload in rows:
+            try:
+                data = json.loads(payload)
+                if isinstance(data, dict) and data.get("approved") is not True:
+                    result[signature] = data
+            except (ValueError, TypeError):
+                continue
+        return result
+
+    def approve_upload_review(self, path: Path, signature: str) -> None:
+        if file_signature(path) != signature:
+            raise OSError("El archivo ha cambiado. Revisa la nueva versión antes de autorizarla.")
+        review = self.review_before_upload(path)
+        if review["signature"] != signature:
+            raise OSError("La revisión ya no corresponde al archivo actual")
+        self.save_service_cache("upload_review", signature,
+                                {"path": str(path), "seconds": review.get("seconds"), "approved": True})
+
     def service_cache(self, scope: str, name: str) -> dict | None:
         with self._connection() as db:
             row = db.execute("SELECT payload, checked_at FROM service_cache WHERE scope=? AND name=?", (scope, name)).fetchone()
@@ -597,19 +688,57 @@ class Store:
             return None
         return {"data": json.loads(row[0]), "checked_at": row[1]}
 
+    def fresh_service_cache(self, scope: str, name: str, seconds: int):
+        cached = self.service_cache(scope, name)
+        if cached:
+            try:
+                age = (datetime.now().astimezone() - datetime.fromisoformat(cached["checked_at"])).total_seconds()
+                if 0 <= age < seconds:
+                    return cached["data"]
+            except (ValueError, TypeError):
+                pass
+        return None
+
     def api_pause(self, scope: str, bucket: str = "general") -> dict | None:
         cached = self.service_cache(scope, "quota_" + bucket)
         if not cached:
             return None
         state = cached["data"]
-        if datetime.fromisoformat(state["retry_at"]) > datetime.now().astimezone():
-            return state
+        try:
+            if datetime.fromisoformat(state["retry_at"]) > datetime.now().astimezone():
+                return state
+        except (KeyError, ValueError, TypeError):
+            pass
+        with self._connection() as db:
+            db.execute("DELETE FROM service_cache WHERE scope=? AND name=? AND payload=?",
+                       (scope, "quota_" + bucket, json.dumps(state)))
         return None
 
     def defer_api(self, scope: str, exc: Exception, bucket: str = "general") -> dict:
+        if isinstance(exc, ApiQuotaUnavailable):
+            return exc.state
         kind, retry_at, source = youtube_retry_prediction(exc)
-        state = {"kind": kind, "retry_at": retry_at.isoformat(), "source": source, "bucket": bucket}
+        now = datetime.now().astimezone()
+        attempts = 1
+        previous = self.service_cache(scope, "last_limit_" + bucket)
+        if kind == "api" and source != "indicado por YouTube" and previous:
+            try:
+                data = previous["data"]
+                age = (now - datetime.fromisoformat(data["observed_at"])).total_seconds()
+                if data.get("kind") == "api" and 0 <= age < 3600:
+                    attempts = min(5, int(data.get("attempts", 1)) + 1)
+                    retry_at = now + timedelta(seconds=min(900, 60 * 2 ** (attempts - 1)))
+            except (KeyError, ValueError, TypeError):
+                pass
+        state = {"kind": kind, "retry_at": retry_at.isoformat(), "source": source, "bucket": bucket,
+                 "observed_at": now.isoformat(), "attempts": attempts}
+        try:
+            details = json.loads(exc.content).get("error", {}).get("errors", [])
+            state["reason"] = ", ".join(str(item.get("reason", "")) for item in details)[:200]
+        except (AttributeError, ValueError, TypeError):
+            state["reason"] = ""
         self.save_service_cache(scope, "quota_" + bucket, state)
+        self.save_service_cache(scope, "last_limit_" + bucket, state)
         return state
 
     def clear_api_pause(self, scope: str) -> None:
@@ -643,6 +772,9 @@ class Store:
                 value = default
             cleaned[key] = value
         config = Config(**cleaned)
+        if config.language not in {"es", "en"}:
+            config.language = "es"
+        config.library_columns = normalize_library_columns(config.library_columns)
         config.scan_interval_seconds = max(2, min(86400, config.scan_interval_seconds))
         config.stable_wait_seconds = max(1, min(86400, config.stable_wait_seconds))
         config.auto_delete_after_hours = max(1, config.auto_delete_after_hours)
@@ -681,7 +813,7 @@ class Store:
         with self._connection() as db:
             row = db.execute(
                 "SELECT 1 FROM upload_registry WHERE signature = ? AND youtube_id != '' "
-                "AND reason IN ('uploaded', 'youtube_title_exists')",
+                "AND reason IN ('uploaded', 'youtube_title_exists', 'manual_confirmed')",
                 (signature,),
             ).fetchone()
             return row is not None
@@ -725,6 +857,84 @@ class Store:
                 (signature, title, str(path), youtube_id, reason, stamp, stamp),
             )
 
+    def confirm_manual_match(self, path: Path, signature: str, youtube_id: str, channel_id: str = "",
+                             acknowledged: bool = False, cancelled: Callable[[], bool] = lambda: False) -> None:
+        from youtube_sync_manual import youtube_video_id
+        video_id = youtube_video_id(youtube_id)
+        if acknowledged is not True:
+            raise ValueError("Debes confirmar que has comparado ambos vídeos completos.")
+        if file_signature(path) != signature:
+            raise OSError("El archivo ha cambiado. Vuelve a comparar su contenido antes de confirmar.")
+        fingerprint = full_content_fingerprint(path, cancelled=cancelled)
+        size, title = path.stat().st_size, creation_title(path)
+        if cancelled() or file_signature(path) != signature:
+            raise OSError("Confirmación cancelada o archivo modificado; no se ha guardado.")
+        stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection() as db:
+            existing = db.execute("SELECT reason FROM upload_registry WHERE signature=?", (signature,)).fetchone()
+            if existing and existing[0] in {"uploaded", "youtube_title_exists"}:
+                raise ValueError("Este archivo ya tiene una confirmación automática; no se sustituye por una manual.")
+            conflicts = db.execute("""SELECT r.path FROM manual_confirmations m
+                                   JOIN upload_registry r ON r.signature=m.signature
+                                   WHERE m.youtube_id=? AND m.fingerprint<>? AND m.signature<>?
+                                   AND r.reason='manual_confirmed'""", (video_id, fingerprint, signature)).fetchall()
+            conflicts += db.execute("""SELECT r.path FROM upload_receipts u
+                                    JOIN upload_registry r ON r.signature=u.signature
+                                    WHERE u.youtube_id=? AND u.fingerprint<>? AND u.signature<>?
+                                    AND r.reason<>'local_deleted'""", (video_id, fingerprint, signature)).fetchall()
+            if any(Path(row[0]).exists() for row in conflicts):
+                raise ValueError("Ese vídeo ya está asignado manualmente a otro archivo de contenido distinto. Revisa el enlace.")
+            if cancelled() or file_signature(path) != signature:
+                raise OSError("El archivo ha cambiado o la operación se ha cancelado.")
+            db.execute("""INSERT INTO manual_confirmations(signature,youtube_id,fingerprint,size,channel_id,confirmed_at) VALUES(?,?,?,?,?,?)
+                       ON CONFLICT(signature) DO UPDATE SET youtube_id=excluded.youtube_id,
+                       fingerprint=excluded.fingerprint,size=excluded.size,channel_id=excluded.channel_id,
+                       confirmed_at=excluded.confirmed_at""", (signature, video_id, fingerprint, size, channel_id, stamp))
+            db.execute("""INSERT INTO upload_registry(signature,title,path,youtube_id,reason,created_at,updated_at)
+                       VALUES(?,?,?,?, 'manual_confirmed',?,?) ON CONFLICT(signature) DO UPDATE SET
+                       title=excluded.title,path=excluded.path,youtube_id=excluded.youtube_id,
+                       reason=excluded.reason,updated_at=excluded.updated_at""", (signature, title, str(path), video_id, stamp, stamp))
+            db.execute("""INSERT INTO uploads(signature,path,title,youtube_id,status,size,created_at,updated_at,error)
+                       VALUES(?,?,?,?, 'manual_confirmed',?,?,?,'') ON CONFLICT(signature) DO UPDATE SET
+                       path=excluded.path,title=excluded.title,youtube_id=excluded.youtube_id,
+                       status=excluded.status,size=excluded.size,updated_at=excluded.updated_at,error=''""",
+                       (signature, str(path), title, video_id, size, stamp, stamp))
+            db.execute("DELETE FROM service_cache WHERE scope='upload_review' AND name=?", (signature,))
+            db.execute("DELETE FROM rejected_matches WHERE signature=? AND youtube_id=?", (signature, video_id))
+            db.execute("DELETE FROM fresh_upload_permissions WHERE signature=?", (signature,))
+
+    def rejected_video_ids(self, signature: str) -> set[str]:
+        with self._connection() as db:
+            return {row[0] for row in db.execute("SELECT youtube_id FROM rejected_matches WHERE signature=?", (signature,))}
+
+    def reject_manual_match(self, path: Path, signature: str, youtube_id: str, upload_requested: bool = False) -> None:
+        from youtube_sync_manual import youtube_video_id
+        video_id = youtube_video_id(youtube_id)
+        if file_signature(path) != signature:
+            raise OSError("El archivo ha cambiado desde la comparación. No se modifica su estado.")
+        stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection() as db:
+            existing = db.execute("SELECT youtube_id,reason FROM upload_registry WHERE signature=?", (signature,)).fetchone()
+            if existing and existing[1] in {"uploaded", "youtube_title_exists"}:
+                raise ValueError("El archivo tiene una confirmación automática; no se descarta desde la comparación manual.")
+            if existing and existing[0] and existing[0] != video_id:
+                raise ValueError("El enlace asociado ha cambiado durante la comparación. Revisa la nueva asociación.")
+            db.execute("INSERT OR REPLACE INTO rejected_matches VALUES(?,?,?)", (signature, video_id, stamp))
+            db.execute("DELETE FROM manual_confirmations WHERE signature=?", (signature,))
+            db.execute("UPDATE upload_registry SET youtube_id='',reason='manual_rejected',updated_at=? WHERE signature=?", (stamp, signature))
+            db.execute("UPDATE uploads SET youtube_id='',status='pending',updated_at=?,error='' WHERE signature=?", (stamp, signature))
+            if upload_requested:
+                last = db.execute("SELECT COALESCE(MAX(id),0) FROM upload_attempts WHERE signature=?", (signature,)).fetchone()[0]
+                db.execute("INSERT OR REPLACE INTO fresh_upload_permissions VALUES(?,?)", (signature, last))
+            else:
+                db.execute("DELETE FROM fresh_upload_permissions WHERE signature=?", (signature,))
+
+    def fresh_upload_authorized(self, signature: str) -> bool:
+        with self._connection() as db:
+            row = db.execute("""SELECT p.after_attempt_id >= COALESCE((SELECT MAX(id) FROM upload_attempts WHERE signature=p.signature),0)
+                             FROM fresh_upload_permissions p WHERE p.signature=?""", (signature,)).fetchone()
+        return bool(row and row[0])
+
     def update_registry_youtube_id(self, signature: str, youtube_id: str) -> None:
         if not youtube_id:
             return
@@ -753,8 +963,26 @@ class Store:
 
     def clear_upload_incident(self, signature: str) -> None:
         """Clear a transient upload state without touching the duplicate registry."""
+        self.authorize_upload_retry(signature)
         with self._connection() as db:
             db.execute("UPDATE uploads SET status = 'pending', error = '' WHERE signature = ?", (signature,))
+
+    def authorize_upload_retry(self, signature: str, after_attempt_id: int | None = None) -> None:
+        with self._connection() as db:
+            if after_attempt_id is None:
+                after_attempt_id = db.execute("SELECT COALESCE(MAX(id),0) FROM upload_attempts WHERE signature=?",
+                                             (signature,)).fetchone()[0]
+            db.execute("""INSERT INTO upload_retry_permissions(signature,after_attempt_id) VALUES(?,?)
+                       ON CONFLICT(signature) DO UPDATE SET
+                       after_attempt_id=MAX(after_attempt_id,excluded.after_attempt_id)""",
+                       (signature, after_attempt_id))
+
+    def retry_required_signatures(self) -> set[str]:
+        with self._connection() as db:
+            rows = db.execute("""SELECT a.signature FROM upload_attempts a
+                              LEFT JOIN upload_retry_permissions p ON p.signature=a.signature
+                              GROUP BY a.signature HAVING MAX(a.id)>COALESCE(MAX(p.after_attempt_id),0)""").fetchall()
+        return {row[0] for row in rows}
 
     def upload_status(self, signature: str) -> str:
         with self._connection() as db:
@@ -774,13 +1002,24 @@ class Store:
                 ).fetchone()
         return (str(row[0]), str(row[1])) if row else ("", "")
 
-    def record_upload_attempt(self, signature: str, path: Path, title: str) -> None:
+    def record_upload_attempt(self, signature: str, path: Path, title: str) -> int | None:
+        """Atomically claim one transfer; failures never implicitly authorize a new one."""
         stamp = datetime.now().isoformat(timespec="seconds")
         with self._connection() as db:
-            db.execute(
-                "INSERT INTO upload_attempts(signature, title, path, created_at) VALUES(?,?,?,?)",
+            db.execute("BEGIN IMMEDIATE")
+            latest = db.execute("SELECT COALESCE(MAX(id),0) FROM upload_attempts WHERE signature=?", (signature,)).fetchone()[0]
+            permission = db.execute("SELECT after_attempt_id FROM upload_retry_permissions WHERE signature=?", (signature,)).fetchone()
+            if latest > (permission[0] if permission else 0):
+                return None
+            cursor = db.execute(
+                "INSERT INTO upload_attempts(signature, title, path, created_at, outcome) VALUES(?,?,?,?, 'started')",
                 (signature, title, str(path), stamp),
             )
+            return cursor.lastrowid
+
+    def finish_upload_attempt(self, attempt_id: int, outcome: str, detail: str = "") -> None:
+        with self._connection() as db:
+            db.execute("UPDATE upload_attempts SET outcome=?,detail=? WHERE id=?", (outcome, detail, attempt_id))
 
     def daily_upload_attempt_count(self, day: datetime | None = None) -> int:
         selected = day or datetime.now()
@@ -894,6 +1133,8 @@ class Store:
                 (stamp, signature),
             )
             db.execute("UPDATE upload_registry SET reason = 'local_deleted', updated_at = ? WHERE signature = ?", (stamp, signature))
+            db.execute("DELETE FROM service_cache WHERE scope='upload_review' AND name=?", (signature,))
+            db.execute("DELETE FROM fresh_upload_permissions WHERE signature=?", (signature,))
 
     def registry_index(self) -> tuple[dict[str, tuple], dict[str, tuple]]:
         with self._connection() as db:
@@ -932,6 +1173,7 @@ class UploadCancelled(Exception):
 
 
 _oauth_lock = threading.Lock()
+_verification_lock = threading.Lock()
 
 
 _oauth_retry_after: dict[str, tuple[float, str]] = {}
@@ -954,7 +1196,7 @@ class QuotaAwareHttp:
         response, content = self.transport.request(uri, method=method, **kwargs)
         if int(response.status) in {403, 429}:
             error = HttpError(response, content, uri=uri)
-            if is_youtube_quota_error(error) and not is_youtube_channel_upload_limit(error):
+            if (is_youtube_quota_error(error) or int(response.status) == 429) and not is_youtube_channel_upload_limit(error):
                 # Granular upload quotas do not block read requests.
                 text = str(error).lower()
                 bucket = "upload" if "video uploads" in text or "videouploads" in text else "general"
@@ -980,6 +1222,7 @@ class YouTubeClient:
         self._known_video_metadata: dict[str, dict] | None = None
         self._index_checked_at = 0.0
         self._index_requested_ids: set[str] | None = None
+        self._index_identity: str | None = None
         self._channel_info: dict | None = None
 
     def available(self) -> bool:
@@ -1208,8 +1451,21 @@ class YouTubeClient:
         titles, _video_ids = self.uploaded_video_index(force=force)
         return titles
 
+    def _verification_scope(self) -> str:
+        try:
+            token_version = str(self.token_path.stat().st_mtime_ns)
+        except FileNotFoundError:
+            token_version = "no-token"
+        identity = f"{self.config.connected_channel_id}|{token_version}"
+        return self.scope + ":" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
     def uploaded_video_index(self, force: bool = False, video_ids: list[str] | None = None) -> tuple[set[str], set[str]]:
+        with _verification_lock:
+            return self._uploaded_video_index(force, video_ids)
+
+    def _uploaded_video_index(self, force: bool, video_ids: list[str] | None) -> tuple[set[str], set[str]]:
         requested_ids = None if video_ids is None else set(video_ids)
+        identity = self._verification_scope()
         pause = self.store.api_pause(self.scope)
         if pause:
             raise ApiQuotaUnavailable(pause)
@@ -1219,8 +1475,33 @@ class YouTubeClient:
             known = self._index_requested_ids if self._index_requested_ids is not None else set(self._known_video_states or {})
             cache_covers_request = set(video_ids).issubset(known)
         if (self._known_titles is not None and self._known_video_ids is not None and not force
+                and self._index_identity == identity
                 and time.monotonic() - self._index_checked_at < (300 if video_ids is None else 60) and cache_covers_request):
             return self._known_titles, self._known_video_ids
+
+        # Share short-lived checks across the UI and worker; destructive actions bypass this.
+        if not force and (self._known_titles is None or self._index_identity != identity):
+            for name, ttl in (("verification_ids", 60), ("verification_full", 300 if requested_ids is None else 60)):
+                cached = self.store.fresh_service_cache(self.scope, name, ttl)
+                if not cached or cached.get("identity") != identity:
+                    continue
+                covered = cached["requested_ids"]
+                if ((requested_ids is None and covered is not None)
+                        or (requested_ids is not None and not requested_ids.issubset(
+                            set(covered) if covered is not None else set(cached["states"])))):
+                    continue
+                self._known_video_states = cached["states"]
+                self._known_video_metadata = cached["metadata"]
+                self._known_title_candidates = cached["candidates"]
+                self._known_video_ids = {key for key, state in cached["states"].items() if state == "processed"}
+                self._known_titles = {title for title, ids in cached["candidates"].items()
+                                      if any(video_id in self._known_video_ids for video_id in ids)}
+                self._index_requested_ids = None if covered is None else set(covered)
+                self._index_identity = identity
+                # Keep the persisted expiry; do not renew it each time it is read.
+                age = (datetime.now().astimezone() - datetime.fromisoformat(cached["checked_at"])).total_seconds()
+                self._index_checked_at = time.monotonic() - max(0, age)
+                return self._known_titles, self._known_video_ids
 
         service = self.service()
         title_candidates: dict[str, list[str]] = {}
@@ -1307,6 +1588,13 @@ class YouTubeClient:
         self._known_video_metadata = video_metadata
         self._index_checked_at = time.monotonic()
         self._index_requested_ids = requested_ids
+        self._index_identity = self._verification_scope()
+        self.store.save_service_cache(self.scope, "verification_full" if requested_ids is None else "verification_ids", {
+            "identity": self._index_identity,
+            "requested_ids": None if requested_ids is None else sorted(requested_ids),
+            "states": video_states, "metadata": video_metadata, "candidates": title_candidates,
+            "checked_at": datetime.now().astimezone().isoformat(),
+        })
         processing = sum(1 for state in video_states.values() if state in {"uploaded", "processing"})
         self.log(f"Comprobados {len(titles)} videos procesados en YouTube" + (f" y {processing} procesando." if processing else "."))
         return titles, video_ids
@@ -1320,6 +1608,9 @@ class YouTubeClient:
         candidates.extend(
             video_id for video_id in (self._known_title_candidates or {}).get(title, []) if video_id not in candidates
         )
+        rejected = self.store.rejected_video_ids(file_signature(path))
+        if isinstance(rejected, set):
+            candidates = [candidate for candidate in candidates if candidate not in rejected]
         if not candidates:
             return False, "", "el video no aparece en el canal", "missing"
         local_size = path.stat().st_size
@@ -1394,6 +1685,7 @@ class YouTubeClient:
             "status": {"privacyStatus": self.config.privacy_status},
         }
         media = MediaFileUpload(str(path), chunksize=8 * 1024 * 1024, resumable=True)
+        request = None
         try:
             request = self.service().videos().insert(part="snippet,status", body=body, media_body=media)
             response = None
@@ -1401,11 +1693,14 @@ class YouTubeClient:
             while response is None:
                 if cancel_event.is_set():
                     raise UploadCancelled("Subida cancelada por el usuario.")
-                status, response = request.next_chunk()
+                status, response = request.next_chunk(num_retries=3 if request.resumable_uri else 0)
                 if status:
                     percent = int(status.progress() * 100)
                     progress(percent, path.name)
                     self.log(f"Subiendo {path.name}: {percent}%")
+        except Exception as exc:
+            exc.upload_session_started = bool(request is not None and request.resumable_uri)
+            raise
         finally:
             media.stream().close()
         video_id = response["id"]
@@ -1458,6 +1753,7 @@ def reconcile_local_uploads(store: Store, config: Config, client: YouTubeClient,
     folder = Path(config.watch_folder).resolve()
     registry, _ = store.registry_index()
     statuses, _ = store.upload_status_index()
+    retry_required = store.retry_required_signatures()
     candidates = {}
     for signature, row in {**registry, **statuses}.items():
         path = Path(row[2]).resolve()
@@ -1465,6 +1761,15 @@ def reconcile_local_uploads(store: Store, config: Config, client: YouTubeClient,
             continue
         record = registry.get(signature)
         status = statuses.get(signature)
+        if record and record[3] and record[4] in {"uploaded", "youtube_title_exists", "manual_confirmed", "local_deleted"}:
+            continue
+        if is_active and is_active(path):
+            continue
+        try:
+            if not path.is_file() or file_signature(path) != signature:
+                continue
+        except OSError:
+            continue
         video_id = record[3] if record else ""
         if not video_id:
             _title, video_id = store.upload_identity(signature)
@@ -1472,9 +1777,9 @@ def reconcile_local_uploads(store: Store, config: Config, client: YouTubeClient,
             candidates[signature] = (path, record[1] if record else row[1], video_id)
     if not candidates:
         return 0
-    if full:
+    if full and any(not item[2] for item in candidates.values()):
         client.uploaded_video_index(force=True)
-    else:
+    elif any(item[2] for item in candidates.values()):
         client.uploaded_video_index(video_ids=list({item[2] for item in candidates.values() if item[2]}))
     changed = 0
     for signature, (path, title, video_id) in candidates.items():
@@ -1500,6 +1805,9 @@ def reconcile_local_uploads(store: Store, config: Config, client: YouTubeClient,
                 new_status, registry_reason, error = "processing", "processing", ""
             elif state == "missing":
                 new_status, registry_reason, error = "pending", "remote_missing", reason
+                if signature in retry_required:
+                    new_status = "error"
+                    error = "Intento anterior sin confirmar. Revisa el canal y pulsa Reintentar."
             else:
                 new_status, registry_reason = (("verification_pending", "needs_verification") if state == "unverified"
                                               else ("error", "unverified"))
@@ -1535,15 +1843,25 @@ class SyncWorker(threading.Thread):
         self._id_client: YouTubeClient | None = None
         self._client_config: str = ""
         self._last_cleanup_at = 0.0
+        self.operation_lock = threading.RLock()
+        self._announced_reviews: set[str] = set()
 
     def log(self, text: str) -> None:
         self.events.put(("log", f"[{now_text()}] {text}"))
+
+    def problem(self, message: str, path: Path | None = None, source: str = "upload",
+                error: Exception | None = None, operation: str = "") -> None:
+        diagnostic = "".join(traceback.format_exception(type(error), error, error.__traceback__)) if error else ""
+        self.events.put(("problem", {"message": message, "path": str(path) if path else "", "source": source,
+                                     "operation": operation, "diagnostic": diagnostic}))
 
     def progress(self, percent: int, filename: str) -> None:
         self.events.put(("progress", {"percent": percent, "filename": filename}))
 
     def pause_for_youtube_limit(self, exc: Exception) -> tuple[str, dict]:
         message = youtube_error_message(exc)
+        if not isinstance(exc, ApiQuotaUnavailable):
+            self.log(f"Rechazo de YouTube: {describe_error(exc)}")
         if not is_youtube_channel_upload_limit(exc):
             config = self.get_config()
             scope = api_scope(config.client_secret_path)
@@ -1551,7 +1869,7 @@ class SyncWorker(threading.Thread):
                 self.store.api_pause(scope) or self.store.api_pause(scope, "upload") or self.store.defer_api(scope, exc))
             self.cancel_upload_event.set()
             self.events.put(("api_quota", state))
-            self.log("Cuota API agotada. Se conservan los estados; las subidas esperan al proximo intento.")
+            self.log(f"{message} Proximo intento: {state['retry_at']} ({state['source']}).")
             return message, state
         kind, retry_at, source = youtube_retry_prediction(exc)
         state = self.store.set_upload_limit(kind, retry_at, source, message)
@@ -1597,6 +1915,15 @@ class SyncWorker(threading.Thread):
 
     def pause_after_current(self) -> None:
         self.enabled_event.clear()
+        queued = 0
+        while True:
+            try:
+                self.manual_uploads.get_nowait()
+                queued += 1
+            except queue.Empty:
+                break
+        if queued:
+            self.log(f"Subidas manuales en cola retiradas antes del borrado local: {queued}.")
         self.wake_event.set()
         self.log("Modo automatico pausado para no iniciar mas subidas; la subida actual continuara.")
 
@@ -1622,12 +1949,15 @@ class SyncWorker(threading.Thread):
                 self.wake_event.clear()
                 continue
             try:
-                self.busy_event.set()
-                self.scan_once(manual_path)
-                if self.enabled_event.is_set():
-                    self.auto_cleanup_once()
+                with self.operation_lock:
+                    if self.stop_event.is_set():
+                        break
+                    self.busy_event.set()
+                    self.scan_once(manual_path)
+                    if self.enabled_event.is_set():
+                        self.auto_cleanup_once()
             except Exception as exc:
-                self.log(f"Error: {describe_error(exc)}")
+                self.problem(describe_error(exc), error=exc, operation="Servicio de sincronizacion")
             finally:
                 self.busy_event.clear()
             self.events.put(("busy", False))
@@ -1642,19 +1972,11 @@ class SyncWorker(threading.Thread):
         if not self.enabled_event.is_set() and manual_path is None:
             return
         if not folder or not folder.exists():
-            self.log("Configura una carpeta valida para empezar.")
+            self.problem("La carpeta configurada no existe. Elige una carpeta valida.", source="configuration")
             return
 
         self.events.put(("busy", True))
         self.cancel_upload_event.clear()
-        client = self.available_client(config)
-        if not client:
-            self.log("No hay credenciales OAuth disponibles. Configura el JSON OAuth.")
-            return
-        pause = self.store.api_pause(client.scope) or self.store.api_pause(client.scope, "upload")
-        if pause:
-            self.events.put(("api_quota", pause))
-            return
         if manual_path is not None:
             if not manual_path.exists() or manual_path.suffix.lower() not in config.extension_set:
                 self.log(f"No se puede subir el archivo seleccionado: {manual_path.name} ya no esta disponible.")
@@ -1666,6 +1988,31 @@ class SyncWorker(threading.Thread):
         if not pending:
             self.log("No hay videos pendientes.")
             self.events.put(("progress", {"percent": 0, "filename": ""}))
+            return
+
+        eligible = []
+        awaiting_review = self.store.pending_upload_reviews()
+        if not isinstance(awaiting_review, dict):
+            awaiting_review = {}
+        for path in pending:
+            try:
+                signature = file_signature(path)
+                known_id = self.store.upload_identity(signature)[1]
+                if (known_id and signature not in awaiting_review) or not self.requires_upload_review(path):
+                    eligible.append(path)
+            except OSError as exc:
+                self.log(f"Se conserva {path.name}: {describe_error(exc)}")
+        pending = eligible
+        if not pending:
+            self.progress(0, "")
+            return
+        client = self.available_client(config)
+        if not client:
+            self.problem("No hay credenciales OAuth disponibles. Configura el JSON OAuth.", source="connection")
+            return
+        pause = self.store.api_pause(client.scope) or self.store.api_pause(client.scope, "upload")
+        if pause:
+            self.events.put(("api_quota", pause))
             return
 
         self.log(f"Encontrados {len(pending)} video(s) candidato(s).")
@@ -1683,13 +2030,13 @@ class SyncWorker(threading.Thread):
             if is_youtube_quota_error(exc):
                 self.pause_for_youtube_limit(exc)
             else:
-                self.log(f"No se pudo comprobar YouTube antes de subir: {youtube_error_message(exc)}")
+                self.problem(f"No se pudo comprobar YouTube antes de subir: {youtube_error_message(exc)}", error=exc, operation="Verificacion previa a la subida")
             return
         except Exception as exc:
             if is_youtube_quota_error(exc):
                 self.pause_for_youtube_limit(exc)
                 return
-            self.log(f"No se pudo comprobar YouTube antes de subir: {describe_error(exc)}")
+            self.problem(f"No se pudo comprobar YouTube antes de subir: {describe_error(exc)}", error=exc, operation="Verificacion previa a la subida")
             return
         for path, video_id in zip(pending, identities):
             if self.stop_event.is_set() or self.cancel_upload_event.is_set():
@@ -1710,14 +2057,14 @@ class SyncWorker(threading.Thread):
             return
         self._last_cleanup_at = time.monotonic()
         older_than = datetime.now() - config.auto_delete_delay
-        rows = self.store.uploaded_before(older_than)
+        rows = [row for row in self.store.uploaded_before(older_than) if Path(row[4]).is_file()]
         if not rows:
             return
         try:
             verifier = YouTubeClient(self.store, config, self.log)
-            verifier.uploaded_video_index(force=True)
+            verifier.uploaded_video_index(force=True, video_ids=list({row[5] for row in rows if row[5]}))
         except Exception as exc:
-            self.log(f"Limpieza automatica cancelada: no se pudo comprobar YouTube ({exc}).")
+            self.problem(f"Limpieza automatica cancelada: no se pudo comprobar YouTube ({exc}).", source="cleanup", error=exc, operation="Verificacion antes de borrar")
             return
         confirmed_rows = []
         mismatches = []
@@ -1763,6 +2110,9 @@ class SyncWorker(threading.Thread):
         deleted = 0
         for signature, target in confirmed_rows:
             try:
+                if file_signature(target) != signature:
+                    self.log(f"Limpieza automatica: se conserva {target.name} porque ha cambiado durante la comprobacion.")
+                    continue
                 target.unlink()
                 self.store.mark_local_deleted(signature)
                 deleted += 1
@@ -1775,6 +2125,11 @@ class SyncWorker(threading.Thread):
     def iter_videos(self, folder: Path, config: Config) -> Iterable[Path]:
         pattern = "**/*" if config.recursive else "*"
         extensions = config.extension_set
+        registry, _ = self.store.registry_index()
+        statuses, _ = self.store.upload_status_index()
+        retry_required = self.store.retry_required_signatures()
+        confirmed = {signature for signature, row in registry.items()
+                     if row[3] and row[4] in {"uploaded", "youtube_title_exists", "manual_confirmed"}}
         try:
             iterator = folder.glob(pattern)
             for path in iterator:
@@ -1782,7 +2137,13 @@ class SyncWorker(threading.Thread):
                     if not path.is_file() or path.suffix.lower() not in extensions:
                         continue
                     signature = file_signature(path)
-                    if not self.store.has_success(signature) and self.is_stable(path, config.stable_wait_seconds):
+                    if statuses.get(signature, (None,) * 4)[3] == "verification_pending":
+                        continue
+                    if (signature in retry_required
+                            and statuses.get(signature, (None,) * 4)[3] not in {"uploading", "processing"}
+                            and registry.get(signature, (None,) * 5)[4] != "processing"):
+                        continue
+                    if signature not in confirmed and self.is_stable(path, config.stable_wait_seconds):
                         yield path
                 except OSError as exc:
                     self.log(f"No puedo leer {path}: {describe_error(exc)}")
@@ -1793,6 +2154,21 @@ class SyncWorker(threading.Thread):
         stat = path.stat()
         age_seconds = time.time() - stat.st_mtime
         return age_seconds >= max(1, int(wait_seconds))
+
+    def requires_upload_review(self, path: Path) -> bool:
+        if self.store.has_success(file_signature(path)):
+            return False
+        review = self.store.review_before_upload(path)
+        if review.get("approved") is True:
+            return False
+        signature = review["signature"]
+        if signature not in self._announced_reviews:
+            self._announced_reviews.add(signature)
+            self.log(f"Revisión necesaria antes de subir {path.name}: " +
+                     (f"dura {review['seconds']} s." if review.get("seconds") is not None else "duración desconocida."))
+            self.events.put(("upload_review", review))
+            self.events.put(("folder_refresh", False))
+        return True
 
     def handle_file(self, path: Path, client: YouTubeClient) -> None:
         try:
@@ -1809,7 +2185,8 @@ class SyncWorker(threading.Thread):
             return
         saved_title, saved_id = self.store.upload_identity(signature)
         content_matches, youtube_id, match_reason, remote_state = client.verify_local_file(path, saved_title or title, saved_id)
-        if remote_state == "unverified" or (content_matches and remote_state == "unknown"):
+        fresh = self.store.fresh_upload_authorized(signature) is True
+        if (remote_state == "unverified" or (content_matches and remote_state == "unknown")) and not fresh:
             self.store.update_registry_state(signature, youtube_id, "needs_verification")
             self.store.upsert(signature, path, title, "verification_pending", youtube_id=youtube_id, error=match_reason)
             self.log(f"No se sube ni se borra {path.name}: {match_reason}.")
@@ -1829,6 +2206,19 @@ class SyncWorker(threading.Thread):
             self.log(f"YouTube aun esta procesando https://youtu.be/{youtube_id}; se conserva y se comprobara de nuevo. Puedes revisarlo en Canal.")
             self.events.put(("folder_refresh", False))
             return
+        if self.requires_upload_review(path):
+            return
+        if file_signature(path) != signature:
+            self.log(f"Se conserva {path.name}: el archivo ha cambiado antes de autorizar la transferencia.")
+            self.events.put(("folder_refresh", False))
+            return
+        attempt_id = self.store.record_upload_attempt(signature, path, title)
+        if not attempt_id:
+            message = "Intento anterior sin confirmar. Revisa el canal y pulsa Reintentar; no se inicia otra subida automaticamente."
+            self.store.upsert(signature, path, title, "error", error=message)
+            self.problem(f"Se conserva {path.name}: {message}", path)
+            self.events.put(("folder_refresh", False))
+            return
         if remote_state in {"failed", "rejected", "terminated"} and youtube_id and content_matches:
             try:
                 client.delete_video(youtube_id)
@@ -1836,7 +2226,8 @@ class SyncWorker(threading.Thread):
             except Exception as exc:
                 message = f"No se pudo retirar de YouTube el intento fallido: {describe_error(exc)}"
                 self.store.upsert(signature, path, title, "error", youtube_id=youtube_id, error=message)
-                self.log(message)
+                self.store.finish_upload_attempt(attempt_id, "error", message)
+                self.problem(message, path, error=exc, operation="Retirar intento fallido de YouTube")
                 self.events.put(("folder_refresh", False))
                 return
         self.store.upsert(signature, path, title, "uploading")
@@ -1844,8 +2235,10 @@ class SyncWorker(threading.Thread):
         self.log(f"Subiendo {path.name} como '{title}'.")
         limit_before_upload = self.store.get_upload_limit()
         try:
-            self.store.record_upload_attempt(signature, path, title)
+            if file_signature(path) != signature:
+                raise UploadCancelled("El archivo ha cambiado antes de iniciar la transferencia.")
             video_id = client.upload(path, title, self.cancel_upload_event, self.progress)
+            self.store.finish_upload_attempt(attempt_id, "received")
             self.store.upsert(signature, path, title, "processing", youtube_id=video_id)
             self.store.remember_upload(signature, path, title, youtube_id=video_id, reason="processing")
             quota_cleared = bool(limit_before_upload)
@@ -1856,24 +2249,32 @@ class SyncWorker(threading.Thread):
                 "path": str(path), "title": title, "youtube_id": video_id, "quota_cleared": quota_cleared,
             }))
             return
+
         except UploadCancelled as exc:
             message = str(exc) + " Se comprobara el canal antes de reintentar; no se borra ningun video automaticamente por esta cancelacion."
             self.store.upsert(signature, path, title, "cancelled", error=message)
-            self.log(message)
+            self.store.finish_upload_attempt(attempt_id, "cancelled", message)
+            self.problem(message, path, operation="Cancelar transferencia")
             self.events.put(("folder_refresh", False))
             return
         except HttpError as exc:
             message = youtube_error_message(exc)
+            self.store.finish_upload_attempt(attempt_id, "quota" if is_youtube_quota_error(exc) else "error", describe_error(exc))
             if is_youtube_quota_error(exc):
                 message, _state = self.pause_for_youtube_limit(exc)
+                if getattr(exc, "upload_session_started", None) is False:
+                    self.store.authorize_upload_retry(signature, attempt_id)
             else:
-                self.log(f"Error de YouTube subiendo {path.name}: {message}")
+                self.problem(f"Error de YouTube subiendo {path.name}: {message}", path, error=exc, operation="Transferir video a YouTube")
             self.store.upsert(signature, path, title, "waiting_quota" if is_youtube_quota_error(exc) else "error", error=message)
             self.events.put(("folder_refresh", False))
             return
         except Exception as upload_error:
+            self.store.finish_upload_attempt(attempt_id, "quota" if is_youtube_quota_error(upload_error) else "error", describe_error(upload_error))
             if is_youtube_quota_error(upload_error):
                 message, _state = self.pause_for_youtube_limit(upload_error)
+                if getattr(upload_error, "upload_session_started", None) is False:
+                    self.store.authorize_upload_retry(signature, attempt_id)
                 self.store.upsert(signature, path, title, "waiting_quota", error=message)
                 self.events.put(("folder_refresh", False))
                 return
@@ -1881,6 +2282,6 @@ class SyncWorker(threading.Thread):
                 self.store.upsert(signature, path, title, "error", error=describe_error(upload_error))
             except OSError as store_error:
                 self.log(f"No se pudo guardar el error de {path}: {describe_error(store_error)}")
-            self.log(f"Error subiendo {path.name}: {describe_error(upload_error)}")
+            self.problem(f"Error subiendo {path.name}: {describe_error(upload_error)}", path, error=upload_error, operation="Transferir video a YouTube")
             self.events.put(("folder_refresh", False))
             return

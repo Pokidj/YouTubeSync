@@ -1,5 +1,7 @@
 # Publicar actualizaciones en GitHub
 
+**Español** | [English](RELEASES.en.md)
+
 ## Fuente de actualizaciones
 
 YouTubeSync consulta exclusivamente la ultima Release estable publicada en

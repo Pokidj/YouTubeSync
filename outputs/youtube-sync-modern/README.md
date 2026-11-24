@@ -1,5 +1,7 @@
 # YouTubeSync
 
+**Español** | [English](README.en.md)
+
 Version final 1.0 de YouTubeSync basada en PySide6/Qt.
 
 Este es el unico proyecto activo. Incluye su propio motor en

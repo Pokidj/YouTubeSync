@@ -3,7 +3,9 @@
 !/.gitignore
 !/.gitattributes
 !/README.md
+!/README.en.md
 !/CHANGELOG.md
+!/CHANGELOG.en.md
 !/docs/
 !/scripts/
 !/tests/
@@ -19,6 +21,7 @@
 !/outputs/youtube-sync-modern/packaging/
 !/outputs/youtube-sync-modern/assets/
 !/outputs/youtube-sync-modern/README.md
+!/outputs/youtube-sync-modern/README.en.md
 !/outputs/youtube-sync-modern/requirements.txt
 !/outputs/youtube-sync-modern/build_exe.ps1
 !/outputs/youtube-sync-modern/Abrir-YouTubeSync.cmd
@@ -41,9 +44,12 @@ credentials*
 smoke_appdata/
 
 /archive/*
+/archive/local-data/
 !/archive/README.md
+!/archive/README.en.md
 !/archive/youtube-sync-legacy/
 /archive/youtube-sync-legacy/*
 !/archive/youtube-sync-legacy/src/
 !/archive/youtube-sync-legacy/README.md
+!/archive/youtube-sync-legacy/README.en.md
 !/archive/youtube-sync-legacy/tests/

@@ -1,7 +1,9 @@
 # YouTubeSync
 
+**Español** | [English](README.en.md)
+
 Aplicacion para Windows que vigila una carpeta y sube videos a YouTube.
-Interfaz en espanol con PySide6/Qt, automatizacion, verificacion de subidas,
+Interfaz en español e inglés con PySide6/Qt, automatizacion, verificacion de subidas,
 gestion del canal y limpieza local con comprobacion previa en YouTube.
 
 Version actual: **1.0**.
@@ -26,7 +28,11 @@ Version actual: **1.0**.
 - Reproduccion en el navegador y enlaces para compartir.
 - Limpieza local con verificacion previa del video en YouTube.
 - Ajustes por pestanas, bandeja del sistema e inicio con Windows configurable.
+- Consola independiente desde Ajustes, con filtros y copia o exportacion de
+  diagnosticos sin incluir campos reconocibles de credenciales.
 - Primera conexion guiada, confirmacion del canal y credenciales propias por usuario.
+- Comparación guiada de archivo local y candidato de YouTube, sesión de reproducción
+  independiente y confirmación manual separada de la verificación automática.
 
 Las subidas y consultas estan sujetas a los limites de YouTube. Desde Ajustes se
 pueden consultar Releases estables de GitHub y descargar paquetes verificados.
@@ -54,9 +60,19 @@ Para distribuirlo se necesita la carpeta `YouTubeSync` completa, incluido `_inte
 
 ## Estructura
 
-- `outputs/youtube-sync-modern`: unico proyecto activo, con interfaz Qt y motor propio.
-- `archive/youtube-sync-legacy`: copia historica, excluida de las compilaciones.
-- `tests`: pruebas de Qt, OAuth y compatibilidad de datos locales.
+- `outputs/youtube-sync-modern/src`, `assets`, `packaging` y `build_hooks`: codigo,
+  recursos y configuracion de la unica aplicacion activa.
+- `outputs/youtube-sync-modern/dist/YouTubeSync`: compilacion actual completa.
+  Aqui esta `YouTubeSync.exe`; `_internal` es parte necesaria de la aplicacion.
+- `outputs/youtube-sync-modern/.venv`: dependencias de desarrollo y compilacion.
+- `docs`, `tests` y `scripts`: documentacion, pruebas y herramientas de mantenimiento.
+- `archive/youtube-sync-legacy`: version anterior conservada, fuera del desarrollo activo.
+- `archive/local-data`: respaldo privado de datos recuperados de pruebas antiguas.
+  No se publica en Git ni lo utiliza la app como configuracion.
+
+Las capturas, prototipos, paquetes obsoletos, entornos antiguos y caches de
+compilacion se han retirado. `build` y `work` pueden volver a crearse al compilar
+o preparar una release; no contienen codigo necesario para ejecutar la app.
 
 Para abrir la app utiliza **Abrir-YouTubeSync.cmd** en la raiz del repositorio.
 Este es el unico punto de entrada recomendado. La app se llama YouTubeSync;
@@ -67,6 +83,10 @@ No depende de la aplicacion archivada. Se mantiene `%APPDATA%\YouTubeSync`
 para conservar configuracion, token y registro de subidas.
 
 ## Configuracion
+
+En **Ajustes > General > Idioma** puedes elegir **Español** (predeterminado)
+o **English**. Guarda y vuelve a abrir YouTubeSync para aplicar el idioma.
+Los nombres de archivos, vídeos y listas, los enlaces y las confirmaciones no cambian.
 
 En la primera apertura aparece **Conectar mi canal**: proyecto propio, API,
 credenciales de escritorio, autorizacion en el navegador, confirmacion del canal

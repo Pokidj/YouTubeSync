@@ -13,6 +13,11 @@ engine = ui.engine
 
 
 class UploadTransportTests(unittest.TestCase):
+    def setUp(self):
+        review = patch.object(engine.SyncWorker, "requires_upload_review", return_value=False)
+        review.start()
+        self.addCleanup(review.stop)
+
     def test_308_without_location_continues_to_next_chunk(self):
         store = Mock()
         store.api_pause.return_value = None
