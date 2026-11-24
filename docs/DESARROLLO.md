@@ -1,221 +1,110 @@
-# Desarrollo y mantenimiento
+# Desarrollo de YouTubeSync
 
 **Español** | [English](DEVELOPMENT.en.md)
 
-## Idiomas
+La información para instalar y utilizar la aplicación está en el [README](../README.md)
+y la [guía de uso](GUIA_DE_USO.md). Esta página es para desarrollar y mantener el código.
 
-`Config.language` admite `es` (predeterminado) y `en`; valores desconocidos vuelven
-a español. Se elige en Ajustes > General y se aplica al abrir de nuevo la app.
-`youtube_sync_i18n.py` y `youtube_sync_translations.py` contienen el catálogo;
-`youtube_sync_i18n_widgets.py` adapta la presentación Qt sin traducir los valores
-del modelo. Los estados persistidos, claves, firmas, ID, títulos, rutas y nombres
-de listas no cambian. Los diagnósticos se clasifican y redactan antes de traducir.
-Las tablas traducen cabeceras y estados al dibujarse; los combos de enumeraciones
-conservan los valores canónicos. Las pruebas de idioma cubren estos contratos.
+## Entorno
 
-## Requisitos
-
-- Windows y Python 3.12.
-- Dependencias de `outputs/youtube-sync-modern/requirements.txt`.
-- JSON OAuth propio y conexion solo para probar operaciones reales con YouTube.
-
-## Ejecutar desde un clon
+Windows de 64 bits, Python 3.12 e Inno Setup 7 para generar el instalador.
+No se necesitan credenciales reales para las pruebas automatizadas.
 
 ```powershell
 git clone https://github.com/Pokidj/YouTubeSync.git
 cd YouTubeSync
-python -m venv outputs/youtube-sync-modern/.venv
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe -m pip install -r outputs/youtube-sync-modern/requirements.txt
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe outputs/youtube-sync-modern/src/youtube_sync_modern.py
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe src/youtube_sync_app.py
 ```
 
-El directorio interno `youtube-sync-modern` se conserva por compatibilidad;
-el nombre visible del producto es YouTubeSync.
+No arranques la ventana principal sobre el perfil real para hacer pruebas:
+puede tener Auto activado. Los tests sustituyen el almacén y las operaciones remotas.
 
-## Arquitectura
+## Estructura
 
-| Ruta | Responsabilidad |
+| Ruta | Contenido |
 | --- | --- |
-| `outputs/youtube-sync-modern/src/youtube_sync_modern.py` | Ventana Qt, ajustes, tablas, canal, miniaturas, bandeja y acciones. |
-| `outputs/youtube-sync-modern/src/youtube_sync_engine.py` | Motor independiente: configuracion, SQLite, OAuth, cliente YouTube y sincronizacion. |
-| `outputs/youtube-sync-modern/assets` | Icono y logo de la interfaz actual. |
-| `outputs/youtube-sync-modern/build_exe.ps1` | Empaquetado Windows con PyInstaller. |
-| `tests/test_layout.py` | Pruebas de la disposicion sin operaciones reales sobre YouTube. |
+| `src/youtube_sync_app.py` | Ventana Qt, ajustes, biblioteca, canal, avisos y bandeja. |
+| `src/youtube_sync_engine.py` | SQLite, configuración, OAuth, API, identidad y trabajador. |
+| `src/youtube_sync_install.py` | Identidad del instalador y cierre coordinado para actualizar. |
+| `src/youtube_sync_updater.py` | Releases oficiales, descarga HTTPS y comprobación SHA-256. |
+| `src/youtube_sync_update_ui.py` | Comprobación, descarga e instalación desde Ajustes. |
+| `src/youtube_sync_i18n*.py`, `youtube_sync_translations.py` | Idiomas de presentación, sin cambiar estados internos. |
+| `src/youtube_sync_manual*.py`, `youtube_sync_*player.py` | Comparación guiada y reproducción local/YouTube. |
+| `assets` | Logo, iconos Lucide y avisos de licencia. |
+| `packaging` | Especificación PyInstaller, manifiesto y script del instalador. |
+| `build_hooks` | Datos auxiliares de SSL para el runtime. |
+| `tests` | Pruebas sin cuentas, subidas ni borrados reales de YouTube. |
+| `scripts` | Validación de la distribución y creación del instalador. |
+| `.github/workflows` | Compilación, validación y publicación de versiones. |
+| `docs` | Uso, arquitectura, verificación y publicación, en español e inglés. |
 
-La interfaz importa directamente `youtube_sync_engine` desde su propio proyecto.
-No hay carga dinamica de archivos de la aplicacion anterior. `archive` conserva
-la copia historica y no forma parte de la compilacion ni de las pruebas activas.
-El proyecto moderno no necesita Tkinter, Pillow ni pystray.
+`.venv`, `build`, `dist`, `work`, `releases`, `.tools` y los respaldos locales no
+se publican. La distribución completa de trabajo queda en `dist/YouTubeSync`;
+`_internal` es imprescindible. No mezcles ejecutables de distintas compilaciones.
 
-La compilacion activa se conserva completa en `dist/YouTubeSync`, incluido
-`_internal`. El entorno `.venv` activo se utiliza para desarrollar y recompilar.
-Las carpetas de pruebas temporales, caches `__pycache__`, `build` y paquetes de
-releases antiguas son regenerables. No mezcles sus ejecutables con la distribucion
-actual. Los datos recuperados durante la limpieza se guardan aparte en
-`archive/local-data`, fuera de Git; los datos activos siguen en AppData.
+## Arquitectura y rendimiento
 
-Las operaciones de red se delegan a hilos y devuelven resultados a la interfaz
-mediante senales o la cola de eventos. La tabla del canal se rellena por lotes.
-Las miniaturas se conservan en memoria y el panel lateral repinta la imagen
-sin decodificarla durante cada redimensionado.
+La interfaz importa su motor directamente. Red, huellas, miniaturas y análisis
+de medios se ejecutan fuera del hilo Qt. Los resultados llegan mediante señales
+o una cola acotada; el canal se pinta por lotes. Los cambios de tamaño se agrupan
+y las imágenes se decodifican una sola vez.
 
-## Pruebas
+Las confirmaciones se guardan por firma e identidad, no por título o duración.
+Los recibos persisten al reiniciar y al limpiar Consola. Recibir bytes no equivale
+a terminar el procesamiento. Los registros manuales están separados y nunca
+permiten limpieza automática. [Protocolo detallado](VERIFICACION_DE_SUBIDAS.md).
+
+Los confirmados sin cambios no se consultan en cada arranque o temporizador.
+Los IDs pendientes se consultan por lotes de 50, con caché compartida de un minuto;
+el catálogo completo tiene cinco minutos. Las comprobaciones de borrado omiten
+la caché. Un fallo de red o cuota no se interpreta como ausencia del vídeo.
+Las pausas se comparten y persisten; no se crean bucles de nuevas sesiones de subida.
+
+La reproducción utiliza un perfil independiente sin leer contraseñas ni copiar
+cookies personales. OAuth no se entrega al reproductor. El documento local de
+comparación solo sirve en 127.0.0.1, con rutas aleatorias y eventos validados.
+
+## Idiomas
+
+`Config.language`: `es` predeterminado o `en`, aplicado al reiniciar. Los adaptadores
+Qt traducen la presentación y conservan los modelos canónicos. No traduzcas nombres,
+rutas, IDs ni estados persistidos. Los diagnósticos se clasifican y redactan antes
+de traducir. Añade todo mensaje nuevo al catálogo y a sus pruebas.
+
+## Pruebas y compilación
 
 ```powershell
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe -m unittest discover -s tests -v
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe -m py_compile outputs/youtube-sync-modern/src/youtube_sync_modern.py outputs/youtube-sync-modern/src/youtube_sync_engine.py
-git diff --check
-```
-
-Las pruebas usan Qt offscreen y sustituyen el almacen y las acciones de carga.
-Comprueban tres tamanos de ventana, proporcion de miniaturas, contenido largo,
-acceso al boton Reproducir y redistribucion al cambiar el separador.
-No validan OAuth, subidas, borrado remoto ni el instalable ejecutandose.
-
-Las pruebas de la interfaz Tk quedaron archivadas con su version. Las pruebas
-activas se centran exclusivamente en Qt y su motor. La extraccion del motor
-conserva la ruta de datos y los formatos de configuracion, token y SQLite.
-
-Para validar esas operaciones, utiliza archivos y videos de prueba y verifica
-los resultados en YouTube y en disco. Revisa especialmente cancelacion,
-reintento, persistencia al reiniciar y conservacion de archivos ante discrepancias.
-
-## Compilar y distribuir
-
-```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests
 powershell -ExecutionPolicy Bypass -File build_exe.ps1
+.\.venv\Scripts\python.exe scripts/check_distribution.py
+.\.venv\Scripts\python.exe scripts/create_release.py
 ```
 
-El script prepara las dependencias y genera:
+La especificación PyInstaller conserva el hook SSL y excluye una `icuuc.dll`
+ajena que puede aparecer en PATH. No la sustituyas por un comando genérico. El
+modo `--self-test` no carga la cuenta ni inicia subidas; comprueba recursos, SSL,
+reproducción local e idiomas. La versión también se escribe en los recursos PE.
 
-Los scripts cargan `outputs/youtube-sync-modern/build_hooks/hook-ssl.py`. Este hook
-incluye el archivo de confianza auxiliar si el runtime de Python lo requiere.
-Si se invoca PyInstaller directamente, hay que conservar `--additional-hooks-dir`
-con esa carpeta: una compilacion correcta no garantiza que HTTPS funcione si
-faltan los datos auxiliares del runtime.
+Los tests cubren persistencia, cancelaciones, HTTP 308, concurrencia OAuth,
+cuota, falsos positivos de identidad, borrado, interfaz, idiomas e instalador.
+No prueban permisos reales de cuentas privadas. Esa comprobación debe hacerse
+con archivos y vídeos desechables y sin rebajar las protecciones automáticas.
 
-```text
-outputs/youtube-sync-modern/dist/YouTubeSync/
-  YouTubeSync.exe
-  _internal/
-```
+## Datos y seguridad
 
-Las pruebas OAuth utilizan credenciales simuladas y verifican concurrencia,
-conservacion del token ante fallos de red y renovacion tras revocacion. No
-autorizan cuentas reales ni realizan subidas.
+Los datos activos permanecen en `%APPDATA%\YouTubeSync`. El instalador es por
+usuario, conserva esa carpeta y actualiza el programa en su ubicación existente.
+El actualizador valida origen, tamaño, SHA-256, cabecera PE, producto y versión;
+vuelve a comprobar el archivo antes de ejecutarlo y exige confirmación.
+El instalador espera al proceso, no fuerza su cierre ni reinicia Windows.
 
-Distribuye la carpeta completa en un ZIP. El repositorio guarda fuentes y
-recursos, y excluye las compilaciones generadas. Estas pueden publicarse como
-archivos adjuntos de una release cuando exista una version verificada.
+La huella de GitHub verifica integridad frente a la publicación, no sustituye
+una firma Authenticode ni protege una cuenta de publicación comprometida.
+No desactives TLS, protecciones de Windows ni el aislamiento del navegador.
 
-La interfaz Qt se compila con `outputs/youtube-sync-modern/packaging/YouTubeSync.spec`.
-Esta especificacion excluye la `icuuc.dll` que otras herramientas pueden anadir
-a PATH; Qt debe usar la API ICU de Windows. No sustituyas la compilacion por
-un comando generico de PyInstaller que pierda esta exclusion.
-Se empaqueta también la traducción base de Qt al español para los botones nativos.
-
-Despues de compilar, comprueba el ejecutable real desde su carpeta `dist`:
-
-```powershell
-./outputs/youtube-sync-modern/dist/YouTubeSync/YouTubeSync.exe --self-test ./qt-startup.json
-```
-
-El comando genera un informe con `ok: true` al terminar correctamente. Este
-modo no carga la base de datos ni inicia OAuth. Los ejecutables de `build` son
-intermedios y no pueden ejecutarse por separado. Los lanzadores
-`Abrir-YouTubeSync.cmd` de la raiz apunta a la unica distribucion activa.
-
-Puedes comprobar la distribucion Qt y sus archivos auxiliares con:
-
-```powershell
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe scripts/check_distribution.py
-```
-
-## Datos y credenciales
-
-La app utiliza `%APPDATA%\YouTubeSync` para sus datos persistentes.
-El `.gitignore` permite los directorios del proyecto y excluye entornos,
-compilaciones, JSON, tokens, bases de datos y registros. No anadas credenciales
-a los ejemplos ni a las pruebas. Revisa `git diff --cached` antes de publicar.
-
-## Versiones y actualizaciones
-
-`APP_VERSION` en `youtube_sync_version.py` define la version mostrada en Ajustes.
-La version actual es 1.0. Las mejoras posteriores permanecen en la seccion
-Sin publicar de [CHANGELOG.md](../CHANGELOG.md) hasta preparar otra version.
-
-`youtube_sync_updater.py` consulta la API publica de Releases y descarga el ZIP
-Windows x64 con limites de tamano, HTTPS, origen fijado, verificacion SHA-256 y
-validacion del manifiesto/rutas. `youtube_sync_update_ui.py` ejecuta el trabajo
-fuera del hilo Qt y lo presenta en Ajustes. Cerrar Ajustes cancela la descarga.
-No se reutiliza el transporte OAuth ni los controles de cuota de YouTube.
-
-`scripts/create_release.py` comprueba el EXE real en modo self-test, contrasta su
-version y genera ZIP completo, manifiesto y checksum. El canal de actualizacion
-no instala ni ejecuta el paquete. El procedimiento de publicacion y sustitucion
-manual esta en [RELEASES.md](RELEASES.md).
-
-## Convenciones
-
-- Guarda el codigo y la documentacion como UTF-8.
-- Evita reescribir archivos desde PowerShell sin especificar la codificacion.
-- Manten las operaciones de YouTube fuera del hilo de la interfaz.
-- Distingue registro local, transferencia y procesamiento remoto en estados y mensajes.
-- Documenta cambios de comportamiento y limitaciones comprobadas en el changelog.
-- Añade los mensajes nuevos al catálogo inglés, sin traducir estados guardados
-  ni nombres definidos por el usuario.
-
-## Identidad y conciliacion
-
-`remote_video_state` normaliza `uploadStatus` y `processingStatus`; recibir el
-archivo no equivale a procesarlo. `reconcile_local_uploads` actualiza el registro
-sin iniciar subidas ni borrar archivos y omite la transferencia activa. Un fallo
-de red no se interpreta como ausencia del video. La interfaz ejecuta este trabajo
-fuera del hilo Qt, incluso cuando Auto esta desactivado.
-
-Las nuevas subidas escriben `YouTubeSync-Fingerprint: sha256:<huella>` en la
-descripcion. Es una huella calculada por la app antes de transferir, no un checksum
-independiente proporcionado por YouTube. Los marcadores antiguos son muestreados:
-se contrastan tambien con nombre original y tamano. Titulo, fecha y duracion
-iguales nunca bastan para confirmar una correspondencia. Un video sin evidencia
-suficiente requiere revision en Canal; no se confirma ni se borra automaticamente.
-
-La conciliacion omite los confirmados sin cambios. La periodica consulta solo
-IDs pendientes de resolver en lotes de 50. Las huellas se calculan en bloques y se
-cachean por ruta, tamano y marcas de tiempo para no releer clips sin cambios.
-
-## Gestion de cuota
-
-`QuotaAwareHttp` envuelve el transporte autorizado, conservando su manejo de
-HTTP 308. Ante cuota agotada guarda una pausa en `service_cache`, compartida
-entre clientes y persistente al reiniciar. La cuota especifica Video Uploads
-solo bloquea transferencias; `uploadLimitExceeded` sigue siendo un limite del
-canal, no del presupuesto general de lectura. El transporte nunca desactiva SSL.
-
-El trabajador reutiliza sus clientes. Separa el catalogo completo (TTL de cinco
-minutos) del indice por IDs conocidos (TTL de un minuto). Los nuevos IDs no se
-ocultan con una copia anterior del catalogo. Una lectura fallida no altera
-confirmaciones anteriores. `waiting_quota` es una espera, no un error del archivo.
-
-La galeria guarda una copia solo tras completar la carga correctamente y la
-identifica con fecha al usarla sin cuota. Nunca se usa esta copia para confirmar
-la presencia actual de un video ni para permitir borrados. La comprobacion de
-cuotas cuenta hasta el proximo intento previsto, no afirma cuota restante real.
-
-## Primera conexion
-
-`youtube_sync_setup.py` contiene el asistente Qt y no depende del modulo de la
-ventana principal. `initialize_session` lo abre solo cuando falta una carpeta o
-credencial configurada; los perfiles existentes mantienen su arranque normal.
-La autorizacion, consulta de canal, listas y avatar se ejecutan fuera del hilo Qt.
-
-`Store.import_oauth_json` admite clientes de escritorio con endpoints oficiales,
-guarda una copia gestionada por ID de cliente y conserva tokens compatibles y
-la pausa de cuota existente. La importacion no guarda por si misma la configuracion.
-El asistente usa un token temporal separado: la cuenta activa solo cambia al
-confirmar canal, carpeta y guardado. Un rechazo limpia la sesion temporal; si
-hay una autorizacion aun en curso, la limpieza se realiza cuando termine.
-
-No inicies un trabajador de subidas durante el asistente. Auto es una eleccion
-explicita y, tras el guardado, espera la comprobacion completa de YouTube.
-`pause_after_current` detiene tambien el resto del lote una vez termina el archivo.
+Guarda UTF-8, evita cambios ajenos y revisa el índice Git antes de publicar.
+Nunca añadas JSON OAuth, tokens, perfiles de navegador, bases de datos ni logs.
+Las versiones se gestionan con `APP_VERSION` en `src/youtube_sync_version.py`.
+Consulta [Publicar versiones](RELEASES.md).

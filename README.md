@@ -2,104 +2,79 @@
 
 **Español** | [English](README.en.md)
 
-Aplicacion para Windows que vigila una carpeta y sube videos a YouTube.
-Interfaz en español e inglés con PySide6/Qt, automatizacion, verificacion de subidas,
-gestion del canal y limpieza local con comprobacion previa en YouTube.
+Sube tus vídeos a YouTube desde una carpeta de Windows. Mantén a la vista qué
+falta por subir, qué se está procesando y qué está confirmado, sin repetir los
+archivos que ya hayas subido.
 
-Version actual: **1.0**.
+![YouTubeSync](assets/youtube-sync-logo.png)
 
-![YouTubeSync](outputs/youtube-sync-modern/assets/youtube-sync-logo.png)
+## Descargar e instalar
 
-## Documentacion
+**[Descargar YouTubeSync para Windows](https://github.com/Pokidj/YouTubeSync/releases/latest)**
 
-- [Guia de uso](docs/GUIA_DE_USO.md): instalacion, primera configuracion,
-  subidas, canal, limpieza y soluciones a problemas habituales.
-- [Desarrollo y arquitectura](docs/DESARROLLO.md): estructura, ejecucion,
-  compilacion, pruebas y mantenimiento.
-- [Historial de cambios](CHANGELOG.md).
-- [Publicar actualizaciones](docs/RELEASES.md): preparar y publicar los paquetes de GitHub Releases.
+1. En la última publicación, descarga **YouTubeSync-1.0-windows-x64-setup.exe**.
+2. Ejecuta el instalador y sigue los pasos. Incluye el programa completo:
+   no necesitas instalar Python ni descargar librerías aparte.
+3. Abre **YouTubeSync** desde el menú Inicio o el acceso directo que hayas elegido.
 
-## Funciones
+Requiere Windows 10 de 64 bits (1809 o posterior) o Windows 11. Los archivos
+**Source code** de GitHub son para desarrollo, no para instalar la aplicación.
+El instalador aún no incorpora un certificado de firma de código propio;
+Windows puede mostrar un aviso de editor desconocido. Descarga solo de este
+repositorio y consulta el archivo `SHA256SUMS.txt` de la publicación.
 
-- Vigilancia de carpetas y subidas con titulo basado en la fecha de creacion.
-- Modo automatico ON/OFF, subida seleccionada, cancelacion y reintento.
-- Registro local persistente y comprobaciones con YouTube.
-- Canal con miniaturas, filtros, privacidad y gestion de listas.
-- Reproduccion en el navegador y enlaces para compartir.
-- Limpieza local con verificacion previa del video en YouTube.
-- Ajustes por pestanas, bandeja del sistema e inicio con Windows configurable.
-- Consola independiente desde Ajustes, con filtros y copia o exportacion de
-  diagnosticos sin incluir campos reconocibles de credenciales.
-- Primera conexion guiada, confirmacion del canal y credenciales propias por usuario.
-- Comparación guiada de archivo local y candidato de YouTube, sesión de reproducción
-  independiente y confirmación manual separada de la verificación automática.
+## Conectar tu canal
 
-Las subidas y consultas estan sujetas a los limites de YouTube. Desde Ajustes se
-pueden consultar Releases estables de GitHub y descargar paquetes verificados.
-La instalacion de esos paquetes sigue siendo manual; no se sustituye el EXE en uso.
+1. Pulsa **Conectar mi canal**. El asistente te guía para preparar tu proyecto
+   de Google Cloud y sus credenciales OAuth de escritorio.
+2. Selecciona el JSON descargado y autoriza tu cuenta en el navegador de Google.
+   YouTubeSync no te pide la contraseña.
+3. Confirma el nombre y la imagen de tu canal.
+4. Elige la carpeta de vídeos, privacidad y lista de reproducción.
+5. Sube un archivo seleccionado o activa **ON** para trabajar automáticamente.
 
-## Desarrollo
+Cada usuario utiliza su propio proyecto y cuota de YouTube. La configuración
+y la autorización se recuerdan. [Guía completa de conexión y uso](docs/GUIA_DE_USO.md).
 
-Requiere Windows y Python 3.12. La unica interfaz activa es PySide6/Qt.
+## Qué puedes hacer
 
-```powershell
-python -m venv outputs/youtube-sync-modern/.venv
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe -m pip install -r outputs/youtube-sync-modern/requirements.txt
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe outputs/youtube-sync-modern/src/youtube_sync_modern.py
-```
+- **Biblioteca:** ordenar los vídeos, elegir columnas y ver sus estados, tamaño,
+  duración, resolución o miniatura local.
+- **Subidas:** automatizar, subir un archivo, cancelar, revisar incidencias y
+  autorizar un reintento concreto.
+- **Confirmación:** conservar la memoria de archivos subidos y comparar un vídeo
+  local con su candidato de YouTube cuando haga falta una revisión manual.
+- **Canal:** buscar, filtrar, abrir vídeos, compartir enlaces, cambiar privacidad,
+  gestionar listas y revisar posibles duplicados antes de decidir qué borrar.
+- **Limpieza:** borrar copias locales con comprobación previa, configurar su
+  conservación o revisar los vídeos de menos de 30 segundos.
+- **Ajustes:** idioma español o inglés, inicio con Windows, bandeja, columnas,
+  reproducción y una consola para consultar o copiar errores.
 
-## Compilar
+Las confirmaciones manuales no autorizan limpieza automática. La cuota API y
+el límite de subidas del canal son distintos: la app respeta sus pausas y no
+inventa un contador de cuota restante ni un desbloqueo garantizado.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File build_exe.ps1
-```
+## Actualizar
 
-El ejecutable se genera en
-`outputs/youtube-sync-modern/dist/YouTubeSync/YouTubeSync.exe`.
-Para distribuirlo se necesita la carpeta `YouTubeSync` completa, incluido `_internal`.
+Ve a **Ajustes > General > Buscar actualizaciones**. Cuando haya una versión
+posterior, descarga el instalador y pulsa **Instalar actualización**. Tras tu
+confirmación, la app se cerrará, se actualizará y volverá a abrirse. Finaliza
+o cancela antes cualquier subida u operación activa.
 
-## Estructura
+Se conservan ajustes, autorización, sesión de reproducción y registro de subidas.
+No necesitas desinstalar antes ni volver a conectar tu canal.
 
-- `outputs/youtube-sync-modern/src`, `assets`, `packaging` y `build_hooks`: codigo,
-  recursos y configuracion de la unica aplicacion activa.
-- `outputs/youtube-sync-modern/dist/YouTubeSync`: compilacion actual completa.
-  Aqui esta `YouTubeSync.exe`; `_internal` es parte necesaria de la aplicacion.
-- `outputs/youtube-sync-modern/.venv`: dependencias de desarrollo y compilacion.
-- `docs`, `tests` y `scripts`: documentacion, pruebas y herramientas de mantenimiento.
-- `archive/youtube-sync-legacy`: version anterior conservada, fuera del desarrollo activo.
-- `archive/local-data`: respaldo privado de datos recuperados de pruebas antiguas.
-  No se publica en Git ni lo utiliza la app como configuracion.
+## Ayuda y datos
 
-Las capturas, prototipos, paquetes obsoletos, entornos antiguos y caches de
-compilacion se han retirado. `build` y `work` pueden volver a crearse al compilar
-o preparar una release; no contienen codigo necesario para ejecutar la app.
+- [Guía de uso y problemas frecuentes](docs/GUIA_DE_USO.md).
+- [Cómo se verifican las subidas](docs/VERIFICACION_DE_SUBIDAS.md).
+- [Cambios de cada versión](CHANGELOG.md).
+- [Comunicar un problema](https://github.com/Pokidj/YouTubeSync/issues): indica
+  versión, acción y error; nunca adjuntes tu JSON OAuth ni tokens.
 
-Para abrir la app utiliza **Abrir-YouTubeSync.cmd** en la raiz del repositorio.
-Este es el unico punto de entrada recomendado. La app se llama YouTubeSync;
-la carpeta `modern` identifica el proyecto Qt en desarrollo.
+Los datos se guardan en `%APPDATA%\YouTubeSync`, separados del programa.
+Desinstalar no elimina esa carpeta. Revisa los informes antes de compartirlos:
+pueden contener nombres, rutas y enlaces de tus vídeos.
 
-El motor esta en `outputs/youtube-sync-modern/src/youtube_sync_engine.py`.
-No depende de la aplicacion archivada. Se mantiene `%APPDATA%\YouTubeSync`
-para conservar configuracion, token y registro de subidas.
-
-## Configuracion
-
-En **Ajustes > General > Idioma** puedes elegir **Español** (predeterminado)
-o **English**. Guarda y vuelve a abrir YouTubeSync para aplicar el idioma.
-Los nombres de archivos, vídeos y listas, los enlaces y las confirmaciones no cambian.
-
-En la primera apertura aparece **Conectar mi canal**: proyecto propio, API,
-credenciales de escritorio, autorizacion en el navegador, confirmacion del canal
-y carpeta. Tambien se puede abrir desde Ajustes > YouTube. Hay un acceso directo
-para quien ya tenga el JSON. La app conserva su copia y recuerda la autorizacion.
-Cada usuario aporta su propio proyecto; no se distribuyen credenciales comunes
-ni se alternan proyectos automaticamente para ampliar cuota.
-
-Las credenciales, tokens, bases de datos, videos y compilaciones locales quedan
-excluidos del repositorio. No se incluyen datos personales de configuracion.
-
-## Verificar la interfaz
-
-```powershell
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe -m unittest discover -s tests -v
-```
+Para colaborar con el código: [documentación de desarrollo](docs/DESARROLLO.md).

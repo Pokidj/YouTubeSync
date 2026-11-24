@@ -60,6 +60,7 @@ from youtube_sync_manual import quota_console_url
 from youtube_sync_manual_ui import ManualConfirmationDialog
 from youtube_sync_help import install_button_help
 from youtube_sync_browser_session import find_browser, open_playback_session
+from youtube_sync_install import launch_installer
 from youtube_sync_library import (LIBRARY_COLUMNS, DEFAULT_LIBRARY_COLUMNS, MEDIA_COLUMNS, STATUS_ICONS,
                                   normalize_library_columns, media_cells)
 from youtube_sync_local_media import LocalMediaLoader
@@ -185,6 +186,7 @@ class SettingsDialog(QWidget):
     setup_requested = Signal()
     problem = Signal(str)
     console_requested = Signal()
+    install_ready = Signal(object)
 
     def __init__(self, store, config, parent=None) -> None:
         super().__init__(parent, Qt.Window)
@@ -265,6 +267,7 @@ class SettingsDialog(QWidget):
         app_section = tracked_section(general_layout, "Aplicacion", "version actualizacion updater consola diagnostico errores registro logs copiar informe idioma language español english")
         app_layout = app_section.layout()
         self.update_panel = UpdatePanel(self.store.base, self)
+        self.update_panel.install_ready.connect(self.install_ready.emit)
         app_layout.addWidget(self.update_panel)
         console_row = QHBoxLayout()
         console_row.addWidget(QLabel("Idioma"))
@@ -1726,6 +1729,11 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def initialize_session(self) -> None:
+        if self.config.run_at_startup:
+            try:
+                engine.set_run_at_startup(True)
+            except OSError as exc:
+                self.log(f"No se pudo actualizar el inicio con Windows: {exc}", source="Configuracion")
         if (not self.config.client_secret_path or not Path(self.config.client_secret_path).is_file()
                 or not self.config.watch_folder or not Path(self.config.watch_folder).is_dir()):
             self.auto_enabled = False
@@ -3030,7 +3038,23 @@ class MainWindow(QMainWindow):
         dialog.problem.connect(lambda message: self.report_problem(message, "settings"))
         dialog.setup_requested.connect(self.open_setup)
         dialog.console_requested.connect(self.open_console)
+        dialog.install_ready.connect(self.install_update)
         dialog.show()
+
+    def install_update(self, plan) -> None:
+        if self.local_delete_running or self.manual_confirmation_running or (self.worker and self.worker.active_path):
+            QMessageBox.warning(self, "Actualizar YouTubeSync", "Finaliza o cancela la operación activa antes de instalar la actualización.")
+            return
+        try:
+            launch_installer(plan, self.config.language)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Actualizar YouTubeSync", str(exc))
+            return
+        self._allow_exit = True
+        self.stop_background_work()
+        if hasattr(self, "tray"):
+            self.tray.hide()
+        QApplication.quit()
 
     def apply_saved_settings(self) -> None:
         updated = self.store.load_config()

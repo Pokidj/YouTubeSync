@@ -7,13 +7,13 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "outputs/youtube-sync-modern/src"))
+sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontDatabase
 import youtube_sync_engine as engine
-import youtube_sync_modern as ui
+import youtube_sync_app as ui
 from youtube_sync_diagnostics import DiagnosticBuffer, DiagnosticWindow
 from youtube_sync_help import HELP, describe_control
 from youtube_sync_i18n import language, set_language, t

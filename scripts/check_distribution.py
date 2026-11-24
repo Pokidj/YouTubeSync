@@ -7,13 +7,14 @@ import tempfile
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-for project in ("youtube-sync-modern",):
-    folder = root / "outputs" / project / "dist/YouTubeSync"
+for project in ("YouTubeSync",):
+    folder = root / "dist/YouTubeSync"
     executable = folder / "YouTubeSync.exe"
-    for name in ("python312.dll", "codex-rejected-cas.pem"):
+    # The SSL self-test covers trust data specific to the Python build vendor.
+    for name in ("python312.dll",):
         if not (folder / "_internal" / name).is_file():
             raise RuntimeError(f"{project}: falta {name}")
-    if project.endswith("modern") and list((folder / "_internal").rglob("icuuc.dll")):
+    if list((folder / "_internal").rglob("icuuc.dll")):
         raise RuntimeError("La distribucion Qt incluye una ICU ajena a Windows")
     with tempfile.TemporaryDirectory(dir=root) as temporary:
         for language in ("es", "en"):

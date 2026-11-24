@@ -1,6 +1,6 @@
 @echo off
 setlocal
-set "APP_DIR=%~dp0outputs\youtube-sync-modern\dist\YouTubeSync"
+set "APP_DIR=%~dp0dist\YouTubeSync"
 if not exist "%APP_DIR%\_internal\python312.dll" goto missing
 start "" "%APP_DIR%\YouTubeSync.exe"
 exit /b 0

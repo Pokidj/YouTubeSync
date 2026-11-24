@@ -52,7 +52,7 @@ class EngineCompatibilityTests(unittest.TestCase):
             with patch.object(engine, "startup_script_path", return_value=target), \
                     patch.object(engine.sys, "frozen", False, create=True):
                 engine.set_run_at_startup(True)
-            self.assertIn("youtube_sync_modern.py", target.read_text())
+            self.assertIn("youtube_sync_app.py", target.read_text())
 
 
 if __name__ == "__main__":

@@ -507,6 +507,21 @@ ONG y activismo|Nonprofits & activism
 """.strip().splitlines()))
 
 ENGLISH.update({
+    "Instalar actualización": "Install update",
+    "Actualizar YouTubeSync": "Update YouTubeSync",
+    "Verificando el instalador antes de actualizar...": "Verifying the installer before updating...",
+    "Finaliza o cancela la operación activa antes de instalar la actualización.": "Finish or cancel the active operation before installing the update.",
+    "La instalación solo está disponible en Windows.": "Installation is only available on Windows.",
+    "El instalador no contiene información de versión válida.": "The installer contains no valid version information.",
+    "El instalador no contiene información del producto.": "The installer contains no product information.",
+    "El archivo descargado no es un instalador de Windows.": "The downloaded file is not a Windows installer.",
+    "La cabecera del instalador no es válida.": "The installer header is invalid.",
+    "El instalador no corresponde a YouTubeSync o a la versión solicitada.": "The installer does not match YouTubeSync or the requested version.",
+    "No hay una actualización válida para instalar.": "There is no valid update to install.",
+    "El instalador ha cambiado durante la comprobación.": "The installer changed during verification.",
+    "La descarga no coincide con la huella publicada. Descárgala de nuevo.": "The download does not match the published digest. Download it again.",
+    "El instalador ha cambiado. Descárgalo de nuevo.": "The installer changed. Download it again.",
+    "Verifica el instalador, pide confirmación y cierra YouTubeSync para actualizar y volver a abrirlo conservando tus datos.": "Verify the installer, ask for confirmation and close YouTubeSync to update and reopen while keeping your data.",
     "Sin notas de version.": "No release notes.",
     "Solo se admiten versiones estables publicadas.": "Only published stable versions are supported.",
     "GitHub ha devuelto una respuesta de release no valida.": "GitHub returned an invalid release response.",
@@ -616,6 +631,8 @@ ENGLISH.update({
 })
 
 TEMPLATES = [
+    ("No se pudo actualizar el inicio con Windows: {error}", "Could not update Windows startup: {error}"),
+    ("Instalar la versión {version}?\n\nYouTubeSync se cerrará y volverá a abrirse al terminar. Tus ajustes, autorización y registro se conservarán.", "Install version {version}?\n\nYouTubeSync will close and reopen when finished. Your settings, authorization and records will be kept."),
     ("GitHub no pudo consultar la release (HTTP {code}).", "GitHub could not retrieve the release (HTTP {code})."),
     ("GitHub no pudo descargar el paquete (HTTP {code}).", "GitHub could not download the package (HTTP {code})."),
     ("Comprobados {count} videos procesados en YouTube", "Checked {count} processed YouTube videos"),

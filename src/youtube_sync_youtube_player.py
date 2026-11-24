@@ -126,7 +126,7 @@ class EmbeddedYouTubePlayer(QWidget):
         probe = self.probe
         probe.finished.connect(lambda code, status: self.probe_finished(probe, code, status))
         probe.errorOccurred.connect(lambda _: self.probe_failed(probe))
-        arguments = [] if getattr(sys, "frozen", False) else [str(Path(__file__).with_name("youtube_sync_modern.py"))]
+        arguments = [] if getattr(sys, "frozen", False) else [str(Path(__file__).with_name("youtube_sync_app.py"))]
         self.status.emit("Preparando reproductor de YouTube…")
         probe.start(sys.executable, arguments + ["--probe-youtube-engine"])
         self.timer.start(15000)

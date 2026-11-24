@@ -2,109 +2,74 @@
 
 [Español](README.md) | **English**
 
-A Windows application that watches a folder and uploads videos to YouTube.
-Built with PySide6/Qt, with Spanish and English interfaces, automatic uploads,
-upload verification, channel management and checked local cleanup.
+Upload videos to YouTube from a Windows folder. See what is pending, processing
+or confirmed without uploading unchanged confirmed files again.
 
-Current version: **1.0**.
+![YouTubeSync](assets/youtube-sync-logo.png)
 
-![YouTubeSync](outputs/youtube-sync-modern/assets/youtube-sync-logo.png)
+## Download and Install
 
-## Documentation
+**[Download YouTubeSync for Windows](https://github.com/Pokidj/YouTubeSync/releases/latest)**
 
-- [User guide](docs/USER_GUIDE.en.md): installation, setup, uploads, channel,
-  cleanup and troubleshooting.
-- [Development and architecture](docs/DEVELOPMENT.en.md): structure, running,
-  building, testing and maintenance.
-- [Changelog](CHANGELOG.en.md).
-- [Publishing updates](docs/RELEASES.en.md): preparing GitHub Releases packages.
-- [Upload verification](docs/UPLOAD_VERIFICATION.en.md): persistent identity,
-  receipts, manual confirmation and deletion safeguards.
+1. Download **YouTubeSync-1.0-windows-x64-setup.exe** from the latest release.
+2. Run the installer. It includes the complete application: no separate Python
+   or library installation is needed.
+3. Open **YouTubeSync** from Start or your chosen desktop shortcut.
+
+Requires 64-bit Windows 10 (1809 or later) or Windows 11. GitHub's **Source code**
+archives are for development, not installation. The installer does not yet have
+a publisher-owned code-signing certificate; Windows may show an unknown-publisher
+warning. Download only from this repository and consult the release's `SHA256SUMS.txt`.
+
+## Connect Your Channel
+
+1. Click **Connect my channel**. The wizard guides you through preparing your own
+   Google Cloud project and Desktop app OAuth credentials.
+2. Select the downloaded JSON and authorize in Google's browser page.
+   YouTubeSync never asks for your password.
+3. Confirm your channel's name and image.
+4. Choose your folder, visibility and playlist.
+5. Upload a selected file or turn **ON** automatic mode.
+
+Each user uses their own project and YouTube quota. Settings and authorization
+are remembered. [Complete setup and user guide](docs/USER_GUIDE.en.md).
 
 ## Features
 
-- Folder watching and upload titles based on file creation date.
-- Automatic ON/OFF mode, selected uploads, cancellation and explicit retries.
-- Persistent local records and YouTube checks.
-- Channel thumbnails, search, filters, visibility and playlist management.
-- Browser playback and sharing links.
-- Local cleanup with fresh YouTube verification.
-- Tabbed settings, system tray and configurable Windows startup.
-- Separate Console window in Settings, with filters and diagnostic copy/export
-  that redacts recognizable credential fields.
-- Guided first connection, channel confirmation and user-owned credentials.
-- Guided local/YouTube comparison, dedicated browser playback session, and
-  explicit manual matching separate from automatic verification.
+- **Library:** sort videos, customize columns and view state, size, duration,
+  resolution or local thumbnail.
+- **Uploads:** automate, upload one file, cancel, review problems and explicitly retry.
+- **Confirmation:** remember confirmed files and compare a local video with its
+  YouTube candidate when manual review is needed.
+- **Channel:** search, filter, open, share, change visibility, manage playlists
+  and review possible duplicates before deciding what to delete.
+- **Cleanup:** verify remote uploads before deleting local copies, configure
+  retention or review videos under 30 seconds.
+- **Settings:** Spanish/English, Windows startup, system tray, columns, playback
+  and a separate diagnostic Console.
 
-Uploads and queries are subject to YouTube limits. Settings can check stable
-GitHub Releases and download verified packages. Installation remains manual;
-the running executable is not replaced automatically.
+Manual confirmations never authorize automatic cleanup. API quota and channel
+upload limits are different. The app respects pauses without inventing a remaining
+quota counter or guaranteed unlock time.
 
-## Development
+## Update
 
-Requires Windows and Python 3.12. PySide6/Qt is the only active interface.
+Open **Settings > General > Check for updates**. When a newer version is available,
+download its installer and click **Install update**. After confirmation, the app
+closes, updates and reopens. Finish or cancel any active upload or operation first.
 
-```powershell
-python -m venv outputs/youtube-sync-modern/.venv
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe -m pip install -r outputs/youtube-sync-modern/requirements.txt
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe outputs/youtube-sync-modern/src/youtube_sync_modern.py
-```
+Settings, authorization, playback session and upload records are kept. No prior
+uninstall or repeated channel authorization is required.
 
-## Build
+## Help and Data
 
-```powershell
-powershell -ExecutionPolicy Bypass -File build_exe.ps1
-```
+- [User guide and troubleshooting](docs/USER_GUIDE.en.md).
+- [How uploads are verified](docs/UPLOAD_VERIFICATION.en.md).
+- [Changelog](CHANGELOG.en.md).
+- [Report an issue](https://github.com/Pokidj/YouTubeSync/issues): include version,
+  action and error; never attach OAuth JSON or tokens.
 
-The executable is generated at
-`outputs/youtube-sync-modern/dist/YouTubeSync/YouTubeSync.exe`.
-Distribute the entire `YouTubeSync` folder, including `_internal`.
+Data is stored separately in `%APPDATA%\YouTubeSync`. Uninstalling does not remove
+it. Review diagnostic reports before sharing: names, paths and video links may remain.
 
-## Structure
-
-- `outputs/youtube-sync-modern/src`, `assets`, `packaging`, `build_hooks`:
-  source, resources and configuration for the only active application.
-- `outputs/youtube-sync-modern/dist/YouTubeSync`: complete current build.
-  `YouTubeSync.exe` and its required `_internal` folder are here.
-- `outputs/youtube-sync-modern/.venv`: development and build dependencies.
-- `docs`, `tests`, `scripts`: documentation, tests and maintenance tools.
-- `archive/youtube-sync-legacy`: previous version, outside active development.
-- `archive/local-data`: private backup of recovered old test data. Excluded
-  from Git and never used automatically as application configuration.
-
-Obsolete screenshots, prototypes, packages, environments and build caches have
-been removed. Build/release tools can recreate `build` and `work`; these do not
-contain source required to run the app.
-
-Use **Abrir-YouTubeSync.cmd** at the repository root to start the application.
-It is the recommended entry point. The product is called YouTubeSync; `modern`
-in the directory name identifies the Qt project.
-
-The independent engine is
-`outputs/youtube-sync-modern/src/youtube_sync_engine.py`. It does not depend
-on the archived application. `%APPDATA%\YouTubeSync` remains the data location
-for settings, authorization and upload records.
-
-## Configuration
-
-Choose **Español** (default) or **English** in **Settings > General > Language**.
-Save and restart YouTubeSync to apply the language. File names, video titles,
-playlist names, URLs and upload confirmations are not translated or changed.
-
-On first launch, **Connect my channel** guides you through your own project,
-API, desktop credentials, browser authorization, channel confirmation and
-folder selection. It is also available in Settings > YouTube. Existing JSON
-owners can skip the preparation steps. The app keeps a managed copy and
-remembers authorization.
-
-Each user supplies their own project. Shared credentials are not distributed
-and projects are not rotated automatically to expand quota.
-
-Credentials, tokens, databases, videos and generated builds are excluded from
-the repository. No personal configuration is included.
-
-## Test
-
-```powershell
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe -m unittest discover -s tests -v
-```
+Contributing to the code: [development documentation](docs/DEVELOPMENT.en.md).

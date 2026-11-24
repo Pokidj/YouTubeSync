@@ -7,12 +7,12 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "outputs/youtube-sync-modern/src"))
+sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFontDatabase
-import youtube_sync_modern as ui
+import youtube_sync_app as ui
 
 
 class ResponsiveLayoutTests(unittest.TestCase):
@@ -86,7 +86,7 @@ class ResponsiveLayoutTests(unittest.TestCase):
     def test_thumbnail_load_does_not_change_size_hint(self):
         thumb = self.window.channel_preview_thumb
         hint = thumb.sizeHint()
-        thumb.set_image((ROOT / "outputs/youtube-sync-modern/assets/youtube-sync-logo.png").read_bytes())
+        thumb.set_image((ROOT / "assets/youtube-sync-logo.png").read_bytes())
         self.assertFalse(thumb._source.isNull())
         self.assertEqual(thumb.sizeHint(), hint)
 

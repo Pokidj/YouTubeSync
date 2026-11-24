@@ -158,7 +158,7 @@ class DiagnosticTests(unittest.TestCase):
         self.assertIn("ventana cerrada", self.window.viewer.toPlainText())
 
     def test_all_bundled_icons_render_visible_pixels(self):
-        for path in (ROOT / "outputs/youtube-sync-modern/assets/icons").glob("*.svg"):
+        for path in (ROOT / "assets/icons").glob("*.svg"):
             with self.subTest(icon=path.stem):
                 image = app_icon(path.stem).pixmap(24, 24).toImage()
                 self.assertFalse(image.isNull())

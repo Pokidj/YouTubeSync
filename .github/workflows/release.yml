@@ -1,0 +1,85 @@
+name: YouTubeSync release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - src/youtube_sync_version.py
+      - .github/workflows/release.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: youtubesync-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONIOENCODING: utf-8
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Plan release
+        id: plan
+        shell: pwsh
+        run: |
+          $version = python -c "import sys; sys.path.insert(0,'src'); from youtube_sync_version import APP_VERSION; print(APP_VERSION)"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          $url = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/v$version"
+          $response = Invoke-WebRequest $url -SkipHttpErrorCheck -Headers @{ Authorization="Bearer $env:GH_TOKEN" }
+          if ($response.StatusCode -eq 200) { 'publish=false' >> $env:GITHUB_OUTPUT }
+          elseif ($response.StatusCode -eq 404) { 'publish=true' >> $env:GITHUB_OUTPUT }
+          else { throw "Cannot check release: $($response.StatusCode)" }
+      - name: Install dependencies
+        if: steps.plan.outputs.publish == 'true'
+        run: python -m pip install -r requirements.txt
+      - name: Test
+        if: steps.plan.outputs.publish == 'true'
+        run: python -B -m unittest discover -s tests
+      - name: Build application
+        if: steps.plan.outputs.publish == 'true'
+        run: python -B -m PyInstaller --noconfirm --distpath dist --workpath build packaging/YouTubeSync.spec
+      - name: Check packaged application
+        if: steps.plan.outputs.publish == 'true'
+        run: python -B scripts/check_distribution.py
+      - name: Prepare official installer compiler
+        if: steps.plan.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .tools -Force | Out-Null
+          $url='https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe'
+          Invoke-WebRequest $url -OutFile .tools/inno.exe
+          $hash=(Get-FileHash .tools/inno.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -ne '8a5a6711c3766a6e5fb74f280ba0e3551e719ce94538d901fdbd1f8f9920b3f0') { throw 'Compiler checksum mismatch' }
+          $signature=Get-AuthenticodeSignature .tools/inno.exe
+          if($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B.V.') { throw 'Compiler signature mismatch' }
+          $directory=Join-Path $env:GITHUB_WORKSPACE '.tools\inno'
+          $process=Start-Process .tools/inno.exe -ArgumentList @('/PORTABLE=1','/CURRENTUSER','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOICONS',('/DIR="'+$directory+'"')) -Wait -PassThru
+          if($process.ExitCode -ne 0) { throw "Compiler setup failed: $($process.ExitCode)" }
+          "ISCC=$directory\ISCC.exe" >> $env:GITHUB_ENV
+      - name: Build installer
+        if: steps.plan.outputs.publish == 'true'
+        run: python -B scripts/create_release.py
+      - name: Test installation and uninstall
+        if: steps.plan.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $setup=Join-Path $env:GITHUB_WORKSPACE 'releases/YouTubeSync-${{ steps.plan.outputs.version }}-windows-x64-setup.exe'
+          ./scripts/check_installer.ps1 -Installer $setup -Target (Join-Path $env:GITHUB_WORKSPACE 'work/installation-smoke')
+      - name: Publish stable release
+        if: steps.plan.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $version='${{ steps.plan.outputs.version }}'
+          gh release create "v$version" "releases/YouTubeSync-$version-windows-x64-setup.exe" releases/SHA256SUMS.txt --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title "YouTubeSync $version" --notes-file docs/RELEASE_NOTES.md --latest
+          if($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

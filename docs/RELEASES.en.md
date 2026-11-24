@@ -1,77 +1,68 @@
-# Publishing GitHub Updates
+# Publishing Releases
 
 [Español](RELEASES.md) | **English**
 
-## Update Source
+## Release Contract
 
-YouTubeSync checks only the latest published stable Release in
-`Pokidj/YouTubeSync`. A commit, push or tag without a Release does not offer
-an application update. Drafts and pre-releases are skipped. Checking is manual
-from **Settings > General > Check for updates**.
+The first public release is **1.0**. Every stable Release includes:
 
-The installed version is defined in
-`outputs/youtube-sync-modern/src/youtube_sync_version.py`. It remains **1.0**;
-these changes do not publish a 1.1 release by themselves.
+- `YouTubeSync-1.0-windows-x64-setup.exe`: complete installer, not a standalone app EXE.
+- `SHA256SUMS.txt`: installer digest.
+- Spanish/English notes describing features, changes and relevant limitations.
 
-## Prepare a Version, Such as 1.1
+Names adapt to each version. GitHub's Source code ZIP is not an installer.
+Environments, profiles, credentials and local data are never published.
 
-1. Change `APP_VERSION` to `1.1` and update both changelogs.
-2. Run tests and build the complete application.
-3. Generate the package from the repository root:
+## Local Build
 
 ```powershell
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe -m unittest discover -s tests
+.\.venv\Scripts\python.exe -m unittest discover -s tests
 powershell -ExecutionPolicy Bypass -File build_exe.ps1
-./outputs/youtube-sync-modern/.venv/Scripts/python.exe scripts/create_release.py
+.\.venv\Scripts\python.exe scripts/check_distribution.py
+.\.venv\Scripts\python.exe scripts/create_release.py
 ```
 
-The final command checks the executable's startup and SSL and requires its
-version to match source. It cannot relabel a 1.0 build as 1.1. It generates:
+Install Inno Setup 7 or point `ISCC` to `ISCC.exe`. Output is saved to `releases`.
+The packager checks actual EXE startup/version, rejects personal data, compiles
+the installer and validates its product/version resources. It cannot relabel an
+older build as a new version.
 
-- `work/releases/YouTubeSync-1.1-windows-x64.zip`
-- `work/releases/SHA256SUMS.txt`
+## Automatic Publication
 
-The ZIP includes the entire `YouTubeSync` folder, `_internal` and the manifest
-`YouTubeSync/release.json`. Do not distribute a standalone EXE or GitHub's
-automatic Source code ZIP; neither replaces the compiled application package.
-The packager rejects common personal/configuration file names, but the contents
-must still be inspected before publication.
+`.github/workflows/release.yml` validates, builds and publishes when
+`src/youtube_sync_version.py` changes on `main`, the workflow itself is introduced,
+or it is manually dispatched in Actions. Published versions are never overwritten;
+increment `APP_VERSION` for a new release.
 
-## Create the Release
+For 1.1, set `APP_VERSION` to `1.1`, update both changelogs and
+`docs/RELEASE_NOTES.md`, then publish source. The workflow creates `v1.1` at that
+commit and attaches the checked installer. Failed tests/installation prevent
+publication. No YouTube secrets are used.
 
-1. Commit and push the changes belonging to the version.
-2. Open [Releases](https://github.com/Pokidj/YouTubeSync/releases) and create one.
-3. Use tag `v1.1`, title `YouTubeSync 1.1` and bilingual release notes.
-4. Attach the generated ZIP and `SHA256SUMS.txt` as assets.
-5. Publish as a stable latest release, not a draft or pre-release.
+## Updater Flow
 
-The ZIP name must exactly match the version. GitHub must supply a valid
-`digest=sha256:...` for that asset. The app will not download a package without
-a published valid fingerprint, even if `SHA256SUMS.txt` exists.
+1. Settings checks the latest stable Release, ignoring drafts/pre-releases and
+   never offering downgrade or same-version reinstall.
+2. Select the exact version's installer, official repository URL and GitHub
+   `sha256:` digest.
+3. HTTPS download verifies size and SHA-256 before retaining the file, then
+   validates PE header, ProductName, ProductVersion and FileDescription.
+4. Install update asks confirmation and rechecks off-thread. Active operations
+   prevent application shutdown for updating.
+5. Start the installer and genuinely exit, not minimize to tray. The installer
+   waits for the PID, updates the previous location and relaunches the app.
 
-## User Experience
+Installation is per-user without elevation. Other apps are not force-closed and
+Windows is never rebooted. `%APPDATA%\YouTubeSync` data survives updates and
+uninstall. Windows startup is refreshed by the app if enabled. Downloads live
+in `%APPDATA%\YouTubeSync\updates`.
 
-Check for updates compares the installed version to the latest stable Release.
-A newer version with a compatible package offers Download and Release notes.
-Download has progress and cancellation, uses HTTPS and needs no GitHub token,
-YouTube authorization or YouTube API quota.
+## Security and Maintenance
 
-Before finalizing the ZIP, the app verifies size, published SHA-256, archive
-paths, included runtime, manifest version and platform. Failed partial downloads
-are not offered as completed packages. ZIPs are saved in
-`%APPDATA%\YouTubeSync\updates`; Open folder displays that location.
+GitHub digest verification is not Authenticode. Version 1.0 has no publisher-owned
+signing certificate; never advertise it as signed. Protect the publisher account
+and do not overwrite released assets. Never ask users to disable Windows security.
 
-This implementation **downloads but does not install automatically**. Exit
-YouTubeSync completely, extract the ZIP and replace the entire program folder.
-Settings, OAuth and records remain in AppData. The app neither overwrites a
-running executable nor executes downloaded content.
-
-SHA-256 checks integrity against GitHub's digest; it is not a Windows digital
-signature and alone does not protect against a compromised publisher account.
-Future automatic installation needs signing/verification, coordinated shutdown,
-backups and recovery.
-
-## References
-
-- [GitHub Releases API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)
-- [Assets and downloads](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)
+References: [Inno Setup](https://jrsoftware.org/inno-setup/documentation/),
+[installation parameters](https://jrsoftware.org/inno-setup/documentation/topic_setupcmdline.htm),
+[GitHub Releases](https://docs.github.com/en/rest/releases/releases).

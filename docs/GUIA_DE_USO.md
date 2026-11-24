@@ -19,10 +19,12 @@ revisa los titulos de la biblioteca antes de iniciar una subida masiva.
 
 ## Instalacion
 
-Si recibes una compilacion, extrae la carpeta completa y ejecuta
-`YouTubeSync.exe`. Conserva la subcarpeta `_internal` junto al ejecutable.
-El codigo del repositorio se ejecuta o compila siguiendo la
-[guia de desarrollo](DESARROLLO.md).
+Descarga el archivo `YouTubeSync-…-windows-x64-setup.exe` de la
+[última publicación](https://github.com/Pokidj/YouTubeSync/releases/latest),
+ejecútalo y abre YouTubeSync desde Inicio. Incluye todas las dependencias;
+no necesitas Python. Los archivos Source code son para desarrollo.
+El instalador conserva los datos de la app en AppData, también al desinstalar.
+La compilación del código se explica en la [guía de desarrollo](DESARROLLO.md).
 
 ## Primera configuracion
 
@@ -271,11 +273,12 @@ estable de `Pokidj/YouTubeSync`, no los commits del repositorio. Si hay una vers
 posterior con paquete Windows x64, puedes ver sus notas y descargarla con progreso
 y cancelacion. No utiliza el OAuth ni la cuota de YouTube.
 
-Solo se da por terminada una descarga cuyo tamano, SHA-256 publicado por GitHub
-y manifiesto de version coinciden. **Abrir carpeta** muestra el ZIP guardado.
-Cierra YouTubeSync por completo antes de extraerlo y sustituir la carpeta del
-programa completa, no solo el EXE. La configuracion y el registro permanecen en
-AppData. No hay instalacion automatica ni reinicio forzado.
+Solo se conserva una descarga cuyo tamaño, SHA-256, producto y versión coinciden.
+Pulsa **Instalar actualización** y confirma: la app se cerrará, el instalador
+esperará al proceso, actualizará el programa y volverá a abrirlo. Finaliza o
+cancela primero cualquier operación activa. No se reinicia Windows ni se fuerza
+el cierre de otras aplicaciones. Se mantienen configuración, autorización,
+sesión y registro. No hace falta desinstalar ni extraer archivos manualmente.
 
 Si aun no hay ninguna Release estable publicada, la app lo indica. Las versiones
 en borrador, preliminares y el Source code ZIP de GitHub no se ofrecen como paquete.

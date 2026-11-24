@@ -6,7 +6,7 @@ import tempfile
 import threading
 import unittest
 import urllib.error
-import zipfile
+import struct
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -16,18 +16,15 @@ import youtube_sync_update_ui as update_ui
 
 sys.path.insert(0, str(ROOT / "scripts"))
 import create_release
+import youtube_sync_install as install
 
 
 def package_bytes(version="1.1", extra=None, manifest=None):
-    stream = io.BytesIO()
-    with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("YouTubeSync/YouTubeSync.exe", b"example-exe")
-        archive.writestr("YouTubeSync/_internal/python312.dll", b"example-runtime")
-        archive.writestr(updater.MANIFEST, json.dumps(manifest or {
-            "app": "YouTubeSync", "version": version, "platform": "windows", "architecture": "x64"}))
-        if extra:
-            archive.writestr(extra, "unexpected")
-    return stream.getvalue()
+    data = bytearray(256)
+    data[:2] = b"MZ"
+    struct.pack_into("<I", data, 60, 64)
+    data[64:68] = b"PE\0\0"
+    return bytes(data) + b"synthetic installer test data"
 
 
 def metadata(body=None):
@@ -43,6 +40,12 @@ def metadata(body=None):
 
 class UpdateTests(unittest.TestCase):
     def setUp(self):
+        identity = patch.object(install, "installer_identity", return_value=("YouTubeSync", "1.1", "YouTubeSync Installer"))
+        identity.start()
+        self.addCleanup(identity.stop)
+        version = patch.object(updater, "APP_VERSION", "1.0")
+        version.start()
+        self.addCleanup(version.stop)
         self.temporary = tempfile.TemporaryDirectory(dir=ROOT)
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
@@ -138,17 +141,19 @@ class UpdateTests(unittest.TestCase):
             self.download(package_bytes(), cancel=cancel, progress=lambda _received, _total: cancel.set())
         self.assertEqual(list(self.base.iterdir()), [])
 
-    def test_zip_traversal_is_rejected_without_extracting_any_files(self):
-        body = package_bytes(extra="YouTubeSync/../../outside.exe")
+    def test_source_archives_and_other_files_are_not_installers(self):
+        body = b"PK\x03\x04not-a-windows-installer"
         with self.assertRaises(updater.UpdateError):
             self.download(body)
         self.assertEqual(list(self.base.iterdir()), [])
 
-    def test_manifest_version_and_architecture_must_match(self):
-        for manifest in ({"app": "YouTubeSync", "version": "1.0", "platform": "windows", "architecture": "x64"},
-                         {"app": "YouTubeSync", "version": "1.1", "platform": "windows", "architecture": "arm64"}):
-            with self.assertRaises(updater.UpdateError):
-                self.download(package_bytes(manifest=manifest))
+    def test_product_and_version_must_match(self):
+        for identity in (("Other app", "1.1", "YouTubeSync Installer"),
+                         ("YouTubeSync", "1.0", "YouTubeSync Installer"),
+                         ("YouTubeSync", "1.1", "Other installer")):
+            with patch.object(install, "installer_identity", return_value=identity):
+                with self.assertRaises(updater.UpdateError):
+                    self.download(package_bytes())
 
     def test_redirects_must_remain_on_allowed_https_github_hosts(self):
         for url in ("http://github.com/file", "https://github.com.example.invalid/file", "https://example.invalid/file"):
@@ -156,16 +161,21 @@ class UpdateTests(unittest.TestCase):
                 updater.GitHubRedirects.validate(url)
         updater.GitHubRedirects.validate("https://release-assets.githubusercontent.com/asset?signature=test")
 
-    def test_packager_builds_a_complete_archive_and_checksum(self):
+    def test_packager_builds_installer_and_checksum(self):
         source, output = self.base / "app", self.base / "release"
         (source / "_internal").mkdir(parents=True)
         (source / "YouTubeSync.exe").write_bytes(b"example-exe")
         (source / "_internal/python312.dll").write_bytes(b"example-runtime")
-        package, checksum = create_release.create_package(source, output, "1.1")
+        def compile_installer(command, **_kwargs):
+            output.mkdir(parents=True, exist_ok=True)
+            (output / updater.package_name("1.1")).write_bytes(package_bytes())
+        with patch.object(create_release.subprocess, "run", side_effect=compile_installer) as compiler:
+            package, checksum = create_release.create_installer(source, output, "1.1", Path("ISCC.exe"))
+        self.assertIn("/DAppVersion=1.1", compiler.call_args.args[0])
         updater.validate_package(package, "1.1")
         self.assertIn(hashlib.sha256(package.read_bytes()).hexdigest(), checksum.read_text())
         with self.assertRaises(ValueError):
-            create_release.create_package(source, source / "release", "1.1")
+            create_release.create_installer(source, source / "release", "1.1")
 
     def test_packager_rejects_personal_configuration(self):
         source = self.base / "app"
@@ -174,7 +184,7 @@ class UpdateTests(unittest.TestCase):
         (source / "_internal/python312.dll").write_bytes(b"example-runtime")
         (source / "config.json").write_text("{}")
         with self.assertRaises(ValueError):
-            create_release.create_package(source, self.base / "release", "1.1")
+            create_release.create_installer(source, self.base / "release", "1.1")
 
     def test_packager_does_not_rename_an_old_binary_as_a_new_version(self):
         def old_version(command, **_kwargs):
@@ -190,6 +200,9 @@ class UpdatePanelTests(unittest.TestCase):
         cls.app = ui.QApplication.instance() or ui.QApplication([])
 
     def setUp(self):
+        version = patch.object(updater, "APP_VERSION", "1.0")
+        version.start()
+        self.addCleanup(version.stop)
         self.panel = update_ui.UpdatePanel(ROOT / "work" / "update-ui-tests")
 
     def tearDown(self):

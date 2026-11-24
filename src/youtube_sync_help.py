@@ -77,6 +77,7 @@ register("Predeterminadas", "Restaura las columnas Archivo, Tamaño, Creado y Es
 register("Mover columna arriba|Mover columna abajo", "Cambia la posición de la columna seleccionada en la biblioteca.")
 register("Buscar actualizaciones", "Consulta las versiones publicadas en GitHub; no instala nada automáticamente.")
 register("Descargar", "Descarga la actualización seleccionada desde la publicación de GitHub.")
+register("Instalar actualización", "Verifica el instalador, pide confirmación y cierra YouTubeSync para actualizar y volver a abrirlo conservando tus datos.")
 register("Notas", "Abre las notas de la versión seleccionada para revisar sus cambios.")
 register("Abrir carpeta", "Abre en el Explorador de Windows la carpeta correspondiente.")
 register("GitHub", "Abre el repositorio oficial de YouTubeSync en el navegador.")

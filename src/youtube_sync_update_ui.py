@@ -1,6 +1,5 @@
 """Manual update checks and downloads, independent of YouTube authorization."""
 
-import os
 import threading
 import webbrowser
 from pathlib import Path
@@ -15,6 +14,8 @@ from youtube_sync_updater import DownloadCancelled, ReleaseClient, RELEASES_URL
 from youtube_sync_version import APP_VERSION
 from youtube_sync_icons import app_icon
 from youtube_sync_i18n_widgets import QDialog, QLabel, QPushButton, QWidget
+from youtube_sync_i18n_widgets import QMessageBox
+from youtube_sync_install import prepare_install
 
 
 class UpdateSignals(QObject):
@@ -22,9 +23,12 @@ class UpdateSignals(QObject):
     downloaded = Signal(object)
     failed = Signal(str)
     progress = Signal(int, int)
+    prepared = Signal(object)
 
 
 class UpdatePanel(QWidget):
+    install_ready = Signal(object)
+
     def __init__(self, data_folder: Path, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("UpdatePanel")
@@ -34,12 +38,14 @@ class UpdatePanel(QWidget):
         self.release = None
         self.downloaded_path = None
         self.closed = False
+        self.preparing = False
         self.cancel = threading.Event()
         self.signals = UpdateSignals(self)
         self.signals.checked.connect(self.checked)
         self.signals.downloaded.connect(self.downloaded)
         self.signals.failed.connect(self.failed)
         self.signals.progress.connect(self.show_progress)
+        self.signals.prepared.connect(self.prepared)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
@@ -75,14 +81,15 @@ class UpdatePanel(QWidget):
         self.notes_button = QPushButton("Notas")
         self.notes_button.setIcon(app_icon("file-text"))
         self.notes_button.clicked.connect(self.show_notes)
-        self.open_button = QPushButton("Abrir carpeta")
-        self.open_button.setIcon(app_icon("folder-open"))
-        self.open_button.clicked.connect(self.open_folder)
-        self.open_button.hide()
+        self.install_button = QPushButton("Instalar actualización")
+        self.install_button.setIcon(app_icon("download"))
+        self.install_button.setObjectName("PrimaryButton")
+        self.install_button.clicked.connect(self.request_install)
+        self.install_button.hide()
         release_button = QPushButton("GitHub")
         release_button.setIcon(app_icon("external-link"))
         release_button.clicked.connect(lambda: webbrowser.open(self.release.url if self.release else RELEASES_URL))
-        for button in (self.download_button, self.cancel_button, self.notes_button, self.open_button):
+        for button in (self.download_button, self.cancel_button, self.notes_button, self.install_button):
             actions.addWidget(button)
         actions.addStretch(1)
         actions.addWidget(release_button)
@@ -95,7 +102,7 @@ class UpdatePanel(QWidget):
         self.release = None
         self.downloaded_path = None
         self.check_button.setEnabled(False)
-        self.open_button.hide()
+        self.install_button.hide()
         self.actions.hide()
         self.progress.setRange(0, 0)
         self.progress.show()
@@ -144,7 +151,7 @@ class UpdatePanel(QWidget):
         self.check_button.setEnabled(False)
         self.download_button.setEnabled(False)
         self.cancel_button.show()
-        self.open_button.hide()
+        self.install_button.hide()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.progress.show()
@@ -178,7 +185,8 @@ class UpdatePanel(QWidget):
         self.check_button.setEnabled(True)
         self.download_button.hide()
         self.cancel_button.hide()
-        self.open_button.show()
+        self.install_button.setEnabled(True)
+        self.install_button.show()
         self.progress.setValue(100)
         self.status.setText(f"Descarga verificada / {path.name}")
 
@@ -186,6 +194,8 @@ class UpdatePanel(QWidget):
         if self.closed:
             return
         self.check_button.setEnabled(True)
+        self.preparing = False
+        self.install_button.setEnabled(True)
         self.cancel_button.hide()
         self.progress.hide()
         self.download_button.setEnabled(bool(self.release and self.release.asset and self.release.is_newer()))
@@ -208,9 +218,37 @@ class UpdatePanel(QWidget):
         layout.addWidget(close)
         dialog.exec()
 
-    def open_folder(self) -> None:
-        if self.downloaded_path and self.downloaded_path.is_file():
-            os.startfile(str(self.downloaded_path.parent))
+    def request_install(self) -> None:
+        if self.closed or self.preparing or not self.release or not self.downloaded_path:
+            return
+        if QMessageBox.question(self, "Actualizar YouTubeSync",
+                f"Instalar la versión {self.release.version}?\n\nYouTubeSync se cerrará y volverá a abrirse al terminar. Tus ajustes, autorización y registro se conservarán.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        self.preparing = True
+        self.check_button.setEnabled(False)
+        self.install_button.setEnabled(False)
+        self.progress.setRange(0, 0)
+        self.progress.show()
+        self.status.setText("Verificando el instalador antes de actualizar...")
+        threading.Thread(target=self.prepare_thread, args=(self.downloaded_path, self.release), daemon=True).start()
+
+    def prepare_thread(self, path, release) -> None:
+        try:
+            plan = prepare_install(path, release)
+            if not self.closed:
+                self.signals.prepared.emit(plan)
+        except (OSError, ValueError) as exc:
+            if not self.closed:
+                self.signals.failed.emit(str(exc))
+
+    def prepared(self, plan) -> None:
+        if not self.closed:
+            self.preparing = False
+            self.check_button.setEnabled(True)
+            self.install_button.setEnabled(True)
+            self.progress.hide()
+            self.install_ready.emit(plan)
 
     def shutdown(self) -> None:
         self.closed = True

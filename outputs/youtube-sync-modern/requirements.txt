@@ -1,7 +1,0 @@
-PySide6>=6.8
-google-api-python-client
-google-auth-oauthlib
-google-auth-httplib2
-httplib2
-pyinstaller
-packaging>=24.2

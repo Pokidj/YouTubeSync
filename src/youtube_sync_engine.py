@@ -415,7 +415,7 @@ def set_run_at_startup(enabled: bool) -> None:
     if enabled:
         path.parent.mkdir(parents=True, exist_ok=True)
         exe = Path(sys.executable).resolve()
-        argument = "" if getattr(sys, "frozen", False) else f' "{Path(__file__).with_name("youtube_sync_modern.py")}"'
+        argument = "" if getattr(sys, "frozen", False) else f' "{Path(__file__).with_name("youtube_sync_app.py")}"'
         path.write_text(f'@echo off\nstart "" "{exe}"{argument}\n', encoding="utf-8")
     elif path.exists():
         path.unlink()

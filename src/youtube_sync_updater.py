@@ -1,28 +1,25 @@
-"""Read public GitHub releases and download verified portable packages."""
+"""Read public GitHub releases and download verified Windows installers."""
 
 import hashlib
 import json
 import re
-import stat
 import tempfile
 import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-import zipfile
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Callable
 
 from packaging.version import InvalidVersion, Version
 
 from youtube_sync_version import APP_VERSION, REPOSITORY
+from youtube_sync_install import validate_installer
 
 RELEASES_URL = f"https://github.com/{REPOSITORY}/releases"
 LATEST_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 MAX_DOWNLOAD = 1024 * 1024 * 1024
-MAX_UNPACKED = 2 * 1024 * 1024 * 1024
-MANIFEST = "YouTubeSync/release.json"
 
 
 class UpdateError(RuntimeError):
@@ -44,7 +41,7 @@ def release_version(value: str) -> Version:
 
 
 def package_name(version: str) -> str:
-    return f"YouTubeSync-{release_version(version)}-windows-x64.zip"
+    return f"YouTubeSync-{release_version(version)}-windows-x64-setup.exe"
 
 
 @dataclass(frozen=True)
@@ -63,8 +60,8 @@ class Release:
     url: str
     asset: ReleaseAsset | None
 
-    def is_newer(self, current: str = APP_VERSION) -> bool:
-        return release_version(self.version) > release_version(current)
+    def is_newer(self, current: str | None = None) -> bool:
+        return release_version(self.version) > release_version(current or APP_VERSION)
 
 
 class GitHubRedirects(urllib.request.HTTPRedirectHandler):
@@ -125,33 +122,9 @@ def parse_release(data: dict) -> Release | None:
 
 def validate_package(path: Path, version: str) -> None:
     try:
-        with zipfile.ZipFile(path) as archive:
-            entries = archive.infolist()
-            if len(entries) > 20000 or sum(item.file_size for item in entries) > MAX_UNPACKED:
-                raise UpdateError("El paquete supera los limites de seguridad de descompresion.")
-            names = set()
-            for item in entries:
-                name = item.filename.replace("\\", "/")
-                parts = PurePosixPath(name)
-                if (parts.is_absolute() or ".." in parts.parts or ":" in name
-                        or not name.startswith("YouTubeSync/") or stat.S_ISLNK(item.external_attr >> 16)
-                        or item.flag_bits & 1):
-                    raise UpdateError("El paquete contiene rutas no permitidas.")
-                if name in names:
-                    raise UpdateError("El paquete contiene archivos duplicados.")
-                names.add(name)
-            if "YouTubeSync/YouTubeSync.exe" not in names or not any(
-                    re.fullmatch(r"YouTubeSync/_internal/python\d+\.dll", name) for name in names):
-                raise UpdateError("Falta el ejecutable o su runtime. No es una distribucion completa.")
-            if MANIFEST not in names or archive.getinfo(MANIFEST).file_size > 16384:
-                raise UpdateError("El paquete no incluye un manifiesto de version valido.")
-            manifest = json.loads(archive.read(MANIFEST))
-            if (not isinstance(manifest, dict) or manifest.get("app") != "YouTubeSync"
-                    or release_version(manifest.get("version", "")) != release_version(version)
-                    or manifest.get("platform") != "windows" or manifest.get("architecture") != "x64"):
-                raise UpdateError("El contenido del paquete no corresponde a esta version de Windows.")
-    except (OSError, zipfile.BadZipFile, KeyError, UnicodeError, json.JSONDecodeError) as exc:
-        raise UpdateError("No se puede validar el archivo ZIP descargado.") from exc
+        validate_installer(path, version)
+    except (OSError, ValueError) as exc:
+        raise UpdateError(str(exc)) from exc
 
 
 class ReleaseClient:

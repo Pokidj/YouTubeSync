@@ -17,9 +17,11 @@ can change that date; review library titles before starting a large batch.
 
 ## Installation
 
-Extract the complete compiled application folder and run `YouTubeSync.exe`.
-Keep `_internal` beside it. To run or build repository source, follow the
-[development guide](DEVELOPMENT.en.md).
+Download `YouTubeSync-…-windows-x64-setup.exe` from the
+[latest release](https://github.com/Pokidj/YouTubeSync/releases/latest), run it
+and open YouTubeSync from Start. Dependencies are included; Python is not needed.
+Source code archives are for development. AppData is kept, including on uninstall.
+See the [development guide](DEVELOPMENT.en.md) for source builds.
 
 ## First Setup
 
@@ -245,11 +247,12 @@ General > Check for updates queries the latest stable `Pokidj/YouTubeSync` Relea
 not repository commits. A newer Windows x64 package offers notes and download
 with progress/cancellation. This uses neither OAuth nor YouTube quota.
 
-Only matching size, published SHA-256 and version manifest complete a download.
-Open folder shows the ZIP. Exit completely before extracting/replacing the entire
-program folder, not just the EXE. Configuration/records stay in AppData. There is
-no automatic installation or forced restart. Drafts, pre-releases and Source code
-ZIPs are not offered as application packages; absence of a stable Release is reported.
+Only matching size, published SHA-256, product and version complete a download.
+Click **Install update** and confirm: the app exits, the installer waits for it,
+updates the program and reopens it. Finish or cancel active work first. Windows
+is not rebooted and other applications are not force-closed. Settings, authorization,
+session and records stay; no uninstall or manual extraction is needed. Drafts,
+pre-releases and Source code ZIPs are not offered as installers.
 
 ## Tray and Exit
 
