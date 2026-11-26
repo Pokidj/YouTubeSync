@@ -348,9 +348,11 @@ class ManualDialogTests(unittest.TestCase):
         self.select()
         actions = [action for label, action in self.window.active_guidance.actions]
         self.assertEqual(actions, ["open_video", "open_local", "manual_verify", "check_video", "console"])
-        self.assertEqual(len(self.window.guidance_buttons), 5)
+        self.assertFalse(hasattr(self.window, "guidance_buttons"))
+        self.assertFalse(self.window.local_preview.verify.isHidden())
+        self.assertFalse(self.window.local_preview.buttons["check_video"].isHidden())
 
-    def test_five_actions_and_both_navigation_buttons_fit_small_window(self):
+    def test_video_actions_are_outside_notice_card_and_visible_in_sidebar(self):
         self.select()
         self.window.set_guidance("other", ui.Guidance("Otro aviso", "Detalle"))
         self.window.resize(940, 620)
@@ -358,9 +360,12 @@ class ManualDialogTests(unittest.TestCase):
             self.app.processEvents()
             self.window.adjust_channel_layout()
         self.assertEqual(self.window.width(), 940)
-        for button in self.window.guidance_buttons + [self.window.guidance_next, self.window.guidance_previous]:
+        self.assertTrue(self.window.local_preview_host.isAncestorOf(self.window.local_preview.actions_widget))
+        for button in self.window.local_preview.buttons.values():
             if button.isVisible():
-                self.assertTrue(self.window.guidance_card.rect().contains(button.mapTo(self.window.guidance_card, button.rect().bottomRight())))
+                self.assertFalse(self.window.guidance_card.isAncestorOf(button))
+                self.assertTrue(self.window.local_preview.actions_widget.rect().contains(
+                    button.mapTo(self.window.local_preview.actions_widget, button.rect().bottomRight())))
 
     def test_navigation_buttons_move_both_directions_and_do_not_stick_on_false_click_argument(self):
         self.window.set_guidance("one", ui.Guidance("Uno", "Detalle"))

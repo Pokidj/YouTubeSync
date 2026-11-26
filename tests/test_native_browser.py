@@ -23,15 +23,15 @@ class SessionSafetyTests(unittest.TestCase):
             profile = next(arg.split("=", 1)[1] for arg in arguments if arg.startswith("--user-data-dir="))
             self.assertEqual(Path(profile), Path(folder).resolve() / "playback-session/chrome")
             self.assertTrue(Path(profile).is_dir())
-            self.assertNotIn("--remote-debugging", " ".join(arguments))
+            self.assertNotIn("--remote-debugging-port", " ".join(arguments))
+            self.assertNotIn("--remote-allow-origins=*", arguments)
+            self.assertNotIn("--enable-automation", arguments)
             self.assertNotIn("--disable-web-security", arguments)
 
     def test_settings_login_and_player_use_the_same_dedicated_profile(self):
-        with tempfile.TemporaryDirectory(dir=fixture.ROOT) as folder, patch("youtube_sync_browser_session.find_browser", return_value=Path("chrome.exe")), patch("youtube_sync_browser_session.subprocess.Popen") as launch:
+        with tempfile.TemporaryDirectory(dir=fixture.ROOT) as folder, patch("youtube_sync_browser_session.find_browser", return_value=Path("chrome.exe")), patch("youtube_sync_browser_session.start_browser") as launch:
             open_playback_session(Path(folder))
-            arguments = launch.call_args.args[0]
-            self.assertEqual(arguments[-2:], ["--new-window", "https://www.youtube.com/"])
-            self.assertIn("--user-data-dir=" + str(Path(folder).resolve() / "playback-session/chrome"), arguments)
+            self.assertEqual(launch.call_args.args, (Path(folder), Path("chrome.exe"), ["--new-window", "https://www.youtube.com/"]))
             self.assertFalse(launch.call_args.kwargs.get("shell", False))
 
     def test_chrome_and_edge_do_not_share_the_same_profile_directory(self):
@@ -103,14 +103,19 @@ class LocalDocumentTests(unittest.TestCase):
     def test_invalid_or_oversized_payloads_are_rejected_and_the_queue_is_bounded(self):
         route = self.document.route + "/event"
         for data in (b"x" * 1025, b"[]", b"not json", json.dumps({"id": VIDEO, "type": "state", "value": True}).encode()):
-            self.assertEqual(self.request("POST", route, data, self.document.origin)[0], 400)
+            try:
+                self.assertEqual(self.request("POST", route, data, self.document.origin)[0], 400)
+            except (ConnectionAbortedError, ConnectionResetError, http.client.RemoteDisconnected):
+                # Windows may reset a rejected connection with an unread oversized body.
+                self.assertGreater(len(data), 1024)
+            self.assertTrue(self.document.events.empty())
         self.assertEqual(self.document.events.maxsize, 100)
 
     def test_close_sends_a_stop_signal_before_server_shutdown(self):
         self.document.close(grace=1)
         status, body, _ = self.request("GET", self.document.route + "/control")
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body), {"stop": True, "play": False})
+        self.assertEqual(json.loads(body), {"stop": True, "play": False, "commands": []})
         html = self.document.html.decode()
         self.assertIn("window.player.mute()", html)
         self.assertIn("window.player.stopVideo()", html)
@@ -142,7 +147,7 @@ class NativePlayerTests(unittest.TestCase):
         with patch("youtube_sync_browser_player.find_browser", return_value=Path("chrome.exe")), \
                 patch("youtube_sync_browser_player.PlayerDocument", return_value=self.document), \
                 patch("youtube_sync_browser_player.BrowserWindow") as window, \
-                patch("youtube_sync_browser_player.subprocess.Popen") as process:
+                patch("youtube_sync_browser_player.start_browser") as process:
             window.return_value.find.return_value = None
             process.return_value.poll.return_value = None
             self.player.load_video(VIDEO)

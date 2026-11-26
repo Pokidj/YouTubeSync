@@ -25,7 +25,8 @@ class GuidanceTests(unittest.TestCase):
 
     def test_state_and_configuration_are_one_card(self):
         self.assertFalse(hasattr(self.window, "config_card"))
-        self.assertEqual(self.window.state_card.title.text(), "CANAL Y CARPETA")
+        self.assertTrue(self.window.state_card.title.isHidden())
+        self.assertEqual(self.window.state_card.title.text(), "")
         self.assertIs(self.window.progress.parentWidget(), self.window.transfer_strip)
 
     def test_folder_refresh_does_not_replace_connected_channel(self):
@@ -153,9 +154,9 @@ class GuidanceTests(unittest.TestCase):
                 self.assertGreaterEqual(self.window.channel_table.height(), 100)
                 heights = {card.height() for card in (self.window.state_card, self.window.guidance_card)}
                 self.assertEqual(len(heights), 1)
-                for button in self.window.guidance_buttons + [self.window.guidance_next]:
-                    if button.isVisible():
-                        self.assertTrue(self.window.guidance_card.rect().contains(button.mapTo(self.window.guidance_card, button.rect().bottomRight())))
+                from PySide6.QtWidgets import QAbstractButton
+                self.assertEqual(set(self.window.guidance_card.findChildren(QAbstractButton)),
+                                 {self.window.guidance_previous, self.window.guidance_next})
 
     def test_backend_emits_structured_problem_for_missing_configuration(self):
         events = queue.Queue()

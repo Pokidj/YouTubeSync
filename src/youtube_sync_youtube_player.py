@@ -13,12 +13,13 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from youtube_sync_manual import youtube_video_id
 from youtube_sync_version import APP_ID
+from youtube_sync_player_controls import command, iframe_command, telemetry
 
 PLAYER_ORIGIN = f"https://{APP_ID.lower()}"
 EVENT_PREFIX = "YouTubeSyncPlayer:"
 
 
-def player_html(video_id: str, origin=PLAYER_ORIGIN, title="YouTubeSync", event_route=None, control_route=None, muted=False) -> str:
+def player_html(video_id: str, origin=PLAYER_ORIGIN, title="YouTubeSync", event_route=None, control_route=None, muted=False, custom_controls=False, captions_off=False) -> str:
     video_id = youtube_video_id(video_id)
     url = urlsplit(origin)
     if origin != PLAYER_ORIGIN and not (url.scheme == "http" and url.hostname == "127.0.0.1" and url.port
@@ -28,7 +29,7 @@ def player_html(video_id: str, origin=PLAYER_ORIGIN, title="YouTubeSync", event_
         if route is not None and not re.fullmatch(r"/[A-Za-z0-9_-]+/(event|control)", route):
             raise ValueError("Ruta de reproducción no permitida")
     options = json.dumps({"videoId": video_id, "width": "100%", "height": "100%",
-                          "playerVars": {"autoplay": 0 if control_route else 1, "playsinline": 1, "controls": 1,
+                          "playerVars": {"autoplay": 0 if control_route else 1, "playsinline": 1, "controls": 0 if custom_controls else 1,
                                          "origin": origin, "widget_referrer": origin}})
     return Template("""<!doctype html><html><head><meta charset="utf-8"><title>$title</title>
 <meta name="referrer" content="strict-origin-when-cross-origin">
@@ -42,25 +43,46 @@ function report(type,value){
  if(endpoint)fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).catch(()=>{});
 }
 let stopped=false, playerReady=false, startRequested=false;
+window.captionsWanted=$captions_wanted;
+function applyCaptions(){
+ const p=window.player;if(window.captionsWanted===null||!p)return;
+ try{const loaded=(p.getOptions?.()||[]).includes('captions');
+ if(window.captionsWanted&&!loaded)p.loadModule?.('captions');
+ else if(!window.captionsWanted&&loaded)p.unloadModule?.('captions');}catch(e){}
+}
 function stopPlayback(){
  if(stopped)return;stopped=true;
  try{window.player.mute();window.player.stopVideo();}catch(e){}
  const frame=document.getElementById('player');if(frame&&frame.tagName==='IFRAME')frame.src='about:blank';
 }
+function applyCommand(c){
+ const p=window.player;if(!playerReady||!p)return;
+ if(c.action==='play')p.playVideo();else if(c.action==='pause')p.pauseVideo();
+ else if(c.action==='seek')p.seekTo(c.value,true);
+ else if(c.action==='relative')p.seekTo(Math.max(0,p.getCurrentTime()+c.value),true);
+ else if(c.action==='volume')p.setVolume(c.value);
+ else if(c.action==='mute'){if(c.value)p.mute();else p.unMute();}
+ else if(c.action==='captions'){window.captionsWanted=c.value;applyCaptions();}
+}
 if(control)setInterval(()=>fetch(control,{cache:'no-store'}).then(r=>{if(!r.ok)throw Error();return r.json();})
  .then(data=>{if(data.stop)stopPlayback();
- else if(data.play&&playerReady&&!startRequested){startRequested=true;window.player.playVideo();}}).catch(stopPlayback),250);
+ else {if(data.play&&playerReady&&!startRequested){startRequested=true;window.player.playVideo();}
+ for(const c of data.commands||[])applyCommand(c);}}).catch(stopPlayback),250);
+setInterval(()=>{try{const p=window.player;if(playerReady&&!stopped&&p.getVideoData().video_id===id)
+ report('progress',{position:p.getCurrentTime(),duration:p.getDuration(),volume:p.getVolume(),muted:p.isMuted(),playing:p.getPlayerState()===1});}catch(e){}},500);
 window.addEventListener('pagehide',stopPlayback);
 window.onYouTubeIframeAPIReady=function(){
  const options=$options;
- options.events={onReady:e=>{playerReady=true;if($muted)e.target.mute();report('ready',0);},
- onStateChange:e=>report('state',e.data),onError:e=>report('error',e.data),
+ options.events={onReady:e=>{playerReady=true;if($muted)e.target.mute();applyCaptions();report('ready',0);},
+ onApiChange:applyCaptions,
+ onStateChange:e=>{if(e.target.getVideoData().video_id===id)report('state',e.data);},onError:e=>report('error',e.data),
  onAutoplayBlocked:()=>report('autoplay',0)};
  window.player=new YT.Player('player',options);
 };
 </script><script src="https://www.youtube.com/iframe_api"></script></body></html>""").substitute(
         title=escape(title), video_id=json.dumps(video_id), prefix=json.dumps(EVENT_PREFIX), options=options,
-        event_route=json.dumps(event_route), control_route=json.dumps(control_route), muted=json.dumps(bool(muted)))
+        event_route=json.dumps(event_route), control_route=json.dumps(control_route), muted=json.dumps(bool(muted)),
+        captions_wanted="false" if captions_off else "null")
 
 
 def playback_error(code: int) -> str:
@@ -79,6 +101,8 @@ class EmbeddedYouTubePlayer(QWidget):
     status = Signal(str)
     reviewed = Signal(str)
     failed = Signal(str)
+    telemetry = Signal(object)
+    available = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -89,6 +113,9 @@ class EmbeddedYouTubePlayer(QWidget):
         self.native = None
         self.native_base = None
         self.prefer_native = True
+        self.first_party = False
+        self.custom_controls = False
+        self.captions_off = False
         self.profile = None
         self.probe = None
         self.muted = False
@@ -102,6 +129,8 @@ class EmbeddedYouTubePlayer(QWidget):
         self.release()
         self.video_id = video_id
         from youtube_sync_browser_session import find_browser
+        if self.first_party and (not self.prefer_native or not find_browser()):
+            raise OSError("Se necesita Chrome o Microsoft Edge para reproducir los privados con tu sesión.")
         if self.prefer_native and find_browser():
             from youtube_sync_browser_player import NativeBrowserPlayer
             base = self.native_base
@@ -114,10 +143,15 @@ class EmbeddedYouTubePlayer(QWidget):
                 import youtube_sync_engine as engine
                 base = engine.app_dir()
             self.native = NativeBrowserPlayer(base, self)
+            self.native.first_party = self.first_party
+            self.native.custom_controls = self.custom_controls
+            self.native.captions_off = self.captions_off
             self.native.muted = self.muted
             self.native.status.connect(self.status)
             self.native.reviewed.connect(self.reviewed)
             self.native.failed.connect(self.failed)
+            self.native.telemetry.connect(self.telemetry)
+            self.native.available.connect(self.available)
             self.layout.addWidget(self.native)
             self.native.load_video(video_id)
             return
@@ -165,7 +199,7 @@ class EmbeddedYouTubePlayer(QWidget):
         self.layout.addWidget(self.view)
         self.status.emit("Cargando vídeo de YouTube…")
         self.view.show()
-        self.view.setHtml(player_html(self.video_id), QUrl(PLAYER_ORIGIN + "/"))
+        self.view.setHtml(player_html(self.video_id, custom_controls=self.custom_controls, captions_off=self.captions_off), QUrl(PLAYER_ORIGIN + "/"))
         self.timer.start(30000)
 
     def renderer_failed(self, view):
@@ -175,7 +209,13 @@ class EmbeddedYouTubePlayer(QWidget):
     def player_event(self, video_id, event, value):
         if not self.view or video_id != self.video_id:
             return
-        if event == "ready":
+        if event == "progress":
+            try:
+                self.telemetry.emit(telemetry(value))
+                self.available.emit(True)
+            except ValueError:
+                pass
+        elif event == "ready":
             self.timer.stop()
             self.status.emit("Pulsa reproducir para comparar el vídeo de YouTube.")
         elif event == "state" and value == 1:
@@ -201,8 +241,18 @@ class EmbeddedYouTubePlayer(QWidget):
         self.status.emit(message)
         self.failed.emit(message)
 
+    def control(self, action, value=None):
+        command(action, value)
+        if self.native is not None:
+            return self.native.control(action, value)
+        if self.view is not None:
+            self.view.page().runJavaScript(iframe_command(action, value))
+            return True
+        return False
+
     def release(self):
         self.timer.stop()
+        self.available.emit(False)
         self.video_id = ""
         if self.native is not None:
             native, self.native = self.native, None

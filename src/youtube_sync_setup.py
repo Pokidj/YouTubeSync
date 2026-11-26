@@ -92,6 +92,7 @@ class SetupWizard(QDialog):
             page.addWidget(button, alignment=Qt.AlignLeft)
             if title == "Prepara las credenciales":
                 audience = QPushButton("Audiencia y usuarios de prueba")
+                audience.setIcon(app_icon("external-link"))
                 audience.clicked.connect(lambda: webbrowser.open("https://console.cloud.google.com/auth/audience"))
                 page.addWidget(audience, alignment=Qt.AlignLeft)
             page.addStretch(1)
@@ -119,6 +120,7 @@ class SetupWizard(QDialog):
         self.confirm_channel.toggled.connect(self.update_navigation)
         confirmation.addWidget(self.confirm_channel)
         other = QPushButton("Elegir otra cuenta")
+        other.setIcon(app_icon("user-round"))
         other.clicked.connect(lambda: self.connect_google(force=True))
         confirmation.addWidget(other, alignment=Qt.AlignLeft)
         confirmation.addStretch(1)
@@ -165,6 +167,7 @@ class SetupWizard(QDialog):
         layout.addWidget(self.message)
         nav = QHBoxLayout()
         self.later = QPushButton("Configurar mas tarde")
+        self.later.setIcon(app_icon("clock"))
         self.later.clicked.connect(self.reject)
         self.back = QPushButton("Anterior")
         self.back.setIcon(app_icon("arrow-left"))

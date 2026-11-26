@@ -4,7 +4,7 @@ import ctypes
 from ctypes import wintypes
 import os
 from pathlib import Path
-import subprocess
+import secrets
 
 
 def find_browser() -> Path | None:
@@ -20,18 +20,27 @@ def find_browser() -> Path | None:
     return next((path for path in candidates if path.is_file()), None)
 
 
-def browser_arguments(base: Path, browser: Path) -> list[str]:
+def playback_profile(base: Path, browser: Path) -> Path:
     profile = Path(base).resolve() / "playback-session" / browser.stem.lower()
     profile.mkdir(parents=True, exist_ok=True)
+    return profile
+
+
+def browser_arguments(base: Path, browser: Path) -> list[str]:
+    profile = playback_profile(base, browser)
     return [str(browser), "--user-data-dir=" + str(profile), "--no-first-run", "--no-default-browser-check"]
+
+
+def start_browser(base: Path, browser: Path, options):
+    from youtube_sync_browser_pipe import launch_browser
+    return launch_browser(browser_arguments(base, browser) + list(options), playback_profile(base, browser))
 
 
 def open_playback_session(base: Path):
     browser = find_browser()
     if browser is None:
         raise OSError("Instala Chrome o Microsoft Edge para gestionar la sesión de reproducción.")
-    arguments = browser_arguments(base, browser) + ["--new-window", "https://www.youtube.com/"]
-    return subprocess.Popen(arguments, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return start_browser(base, browser, ["--new-window", "https://www.youtube.com/"])
 
 
 class BrowserWindow:
@@ -58,6 +67,16 @@ class BrowserWindow:
         self.get_style.argtypes, self.get_style.restype = [wintypes.HWND, ctypes.c_int], ctypes.c_ssize_t
         self.set_style.argtypes, self.set_style.restype = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t], ctypes.c_ssize_t
         self.user.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        self.user.SetPropW.argtypes = [wintypes.HWND, wintypes.LPCWSTR, wintypes.HANDLE]
+        self.user.GetPropW.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
+        self.user.GetPropW.restype = wintypes.HANDLE
+        self.user.RemovePropW.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
+        self.user.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        self.user.GetDpiForWindow.argtypes = [wintypes.HWND]
+        self.user.GetDpiForWindow.restype = wintypes.UINT
+        self.user.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+                                                 wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
+        self._property_name = None
 
     def text(self, hwnd):
         text = ctypes.create_unicode_buffer(self.user.GetWindowTextLengthW(hwnd) + 1)
@@ -96,17 +115,64 @@ class BrowserWindow:
 
     def owned(self):
         return bool(self.hwnd and self.user.IsWindow(self.hwnd)
-                    and self.window_pid(self.hwnd) == self.pid and self.title in self.text(self.hwnd))
+                    and self.window_pid(self.hwnd) == self.pid
+                    and (self.user.GetPropW(self.hwnd, self._property_name) == self._property_value
+                         if self._property_name else self.title in self.text(self.hwnd)))
+
+    def pin_identity(self):
+        if not self.owned():
+            return False
+        name, value = "YouTubeSync." + secrets.token_hex(16), secrets.randbelow(0x7ffffffe) + 1
+        if not self.user.SetPropW(self.hwnd, name, value):
+            return False
+        self._property_name, self._property_value = name, value
+        return True
 
     def strip_frame(self):
         if self.owned():
             style = self.get_style(self.hwnd, -16)
             decorations = 0x00C00000 | 0x00040000 | 0x00020000 | 0x00010000 | 0x00080000 | 0x80000000
-            self.set_style(self.hwnd, -16, (style & ~decorations) | 0x40000000)
-            self.user.SetWindowPos(self.hwnd, None, 0, 0, 0, 0, 0x0037)
+            wanted = (style & ~decorations) | 0x40000000
+            if style != wanted:
+                self.set_style(self.hwnd, -16, wanted)
+                self.user.SetWindowPos(self.hwnd, None, 0, 0, 0, 0, 0x0037)
+
+    def caption_height(self):
+        if not self.owned():
+            return 0
+        rect = wintypes.RECT()
+        if not self.user.GetWindowRect(self.hwnd, ctypes.byref(rect)):
+            return 0
+        x = (rect.left + rect.right) // 2
+        # Crop only a caption confirmed by Windows, never the YouTube controls.
+        def hit_at(offset):
+            hit = ctypes.c_size_t()
+            point = ((rect.top + offset) & 0xffff) << 16 | (x & 0xffff)
+            if not self.user.SendMessageTimeoutW(self.hwnd, 0x0084, 0, point, 2, 15, ctypes.byref(hit)):
+                return None
+            return hit.value
+        dpi = self.user.GetDpiForWindow(self.hwnd) or 96
+        scale = dpi / 96
+        start, end = round(8 * scale), round(80 * scale)
+        if hit_at(start) != 2 or hit_at(end) in (None, 2):
+            return 0
+        low, high = start, end
+        while high - low > 1:
+            middle = (low + high) // 2
+            hit = hit_at(middle)
+            if hit is None:
+                return 0
+            if hit == 2:
+                low = middle
+            else:
+                high = middle
+        return high
 
     def close(self):
         if self.owned():
+            if getattr(self, "_property_name", None):
+                self.user.RemovePropW(self.hwnd, self._property_name)
+                self._property_name = None
             self.user.ShowWindow(self.hwnd, 0)
             self.user.PostMessageW(self.hwnd, 0x0010, 0, 0)
         self.hwnd, self.pid = None, None

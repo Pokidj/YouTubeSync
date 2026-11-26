@@ -8,11 +8,14 @@ class FakeYouTubePlayer(QWidget):
     status = Signal(str)
     reviewed = Signal(str)
     failed = Signal(str)
+    telemetry = Signal(object)
+    available = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.auto_review = True
         self.video_id = ""
+        self.commands = []
         self.setMinimumSize(200, 200)
 
     def load_video(self, video_id):
@@ -23,3 +26,7 @@ class FakeYouTubePlayer(QWidget):
 
     def release(self):
         self.video_id = ""
+
+    def control(self, action, value=None):
+        self.commands.append((action, value))
+        return bool(self.video_id)

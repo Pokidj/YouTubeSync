@@ -25,7 +25,7 @@ See the [development guide](DEVELOPMENT.en.md) for source builds.
 
 ## First Setup
 
-1. First launch opens **Connect my channel**, also available in Settings > YouTube.
+1. First launch opens **Connect my channel**, also available in Settings > Connection.
    Choose **I already have my OAuth JSON** to skip preparation if applicable.
 2. The wizard guides creation of your own Google Cloud project, enabling YouTube
    Data API v3 and creating a Desktop app OAuth client.
@@ -61,22 +61,27 @@ is allowed to authorize it. Never publish the JSON or access token to GitHub.
 | Control | Function |
 | --- | --- |
 | ON / OFF | Enable or pause automatic mode. |
-| Up arrow | Request pending uploads and enable automatic mode. |
-| Stop | Request cancellation of the active upload and set Auto OFF. |
-| Refresh | Reload settings/folder and check the YouTube connection. |
+| ? | Open general options and the notice list, without a separate menu arrow. |
+| Upload pending, above the local table | Request the pending queue and enable automatic mode. |
+| Stop, above the local table | Cancel the active queue/upload and set Auto OFF. |
+| Refresh folder | Scan the local folder without API calls; its menu explicitly checks with YouTube. |
 | Gear | Open Settings. |
 
 Hover over a button for its description. Cancellation may wait for the current
 transfer operation/chunk. Cancelling does not automatically delete remote videos.
 Before retrying, the app checks the channel; a video still processing is kept.
-Doubtful videos can be reviewed and manually deleted from Channel.
+Doubtful videos can be reviewed and manually deleted from On YouTube.
 
-## Videos Tab
+## On My Computer Tab
+
+The connection profile and Notices belong to this tab. Notices contains only
+navigation arrows: general actions are above the table and file-specific actions
+are in the sidebar. Background updates do not undo your selected notice.
 
 The table shows files in the configured folder. Defaults are File, Size, Created
 and Status, with header/state icons. Click a header to sort; file size uses bytes.
 
-In **Settings > Library**, choose visible columns and reorder them by dragging
+In **Settings > On my computer**, choose visible columns and reorder them by dragging
 or using arrows. **Defaults** restores the initial layout. Save applies and
 remembers changes. Title and Path remain available as optional columns.
 
@@ -102,26 +107,64 @@ Local Uploaded state is not a live remote check. Retention cleanup and Verify
 and delete query YouTube before deleting the local copy. Unchecked manual deletion
 requires explicitly accepting its separate warning.
 
-Select a file and use Upload for an individual request. Retry authorizes a new
+Select a file and use Upload in its sidebar for an individual request. Retry there authorizes a new
 attempt; Open local file uses the Windows-associated program. Refresh folder
 forces a local scan.
 
+The header contains **ON/OFF**, the **General options** question mark and **Settings**. Above the table, **Upload pending**
+targets the queue; individual upload is in the sidebar. Stop cancels
+the active queue or transfer. Refresh scans the local folder without API calls;
+its **Check with YouTube** menu action checks the remote connection, respecting
+quota pauses. Hover over icons for descriptive help.
+
+Tabs sit above the profile and Notices. Selecting a file displays a local sidebar
+with the path below the name, a thumbnail, and status, size, creation date and duration
+panels. Duration uses available local metadata; a dash means it is not yet available.
+Drag the divider to resize it.
+Play loads the local file, with seeking, ten-second jumps, volume and an external
+player option. Changing files or tabs stops playback; refreshing preserves an
+unchanged selection. The sidebar can open its YouTube link when available or start
+manual comparison where appropriate; it never confirms a match automatically.
+The screen icon in the controls opens full screen with pause, seeking, skips and
+volume. Escape or Return to panel preserves playback position. Closing the full-screen
+window or changing files stops playback. Pending files do not offer guided matching.
+The folder button always opens the folder configured in Settings, regardless of
+the selection. **Locate**, in the sidebar, reveals the selected file in File Explorer and is disabled
+without a selection. Neither action plays the video.
+
+In both tabs the sidebar appears only when a row is selected. Use **Hide panel /
+Show panel**, using the arrow-only button above the table, to hide or restore it without clearing the
+selection. Hiding stops playback and returns the full width to the table. Each tab
+retains its own hide preference and panel width during the session; changing rows,
+refreshing or switching tabs does not undo a manual hide. Without a selection,
+the button is disabled.
+
+Both sidebars keep their actions inside the frame, docked at the bottom while the
+details scroll. Seeking, pause, skip and volume sit directly below the video in both
+tabs, followed by matching icon-based detail panels. On YouTube also retains captions,
+sharing and full screen. Buttons use muted functional colors: green for uploading, playing or
+confirming; red for deleting or stopping; blue for browsing or opening; amber for review
+and cleanup. Hover help and safety confirmations are retained.
+
 Before a new upload the app reads duration locally, without querying YouTube.
 Videos **under 30 seconds**, or with unreadable duration, require **Review**.
-The notice/Upload action offers **Approve and upload**, **Open local file**,
+The sidebar Review/Upload action offers **Approve and upload**, **Open local file**,
 **Delete local file** or **Later**. Deletion asks separately. Nothing is deleted
 or uploaded automatically by this review. Approval survives restart but not file
 changes. Already confirmed uploads are not uploaded again or reviewed again.
 
-### Now Actions
+### Notices and Actions
 
-Now shows contextual actions for the notice/selected file, up to five buttons,
-with previous/next arrows. Tooltips describe icons. File actions target the
-notice's file, not an unrelated earlier selection.
+Notices displays information and contains only previous/next navigation arrows.
+You can also select a notice under **General options > Notices** in the header.
+Connection, quota, pending-file review and diagnostics are in the question-mark menu.
+File-specific Upload, Retry, Review, Compare, Check, Locate and Delete local actions
+are in the fixed bottom area of the selected file's sidebar, according to its state.
+They target that file even when Notices is displaying a different problem.
 
 For **Needs verification**, actions include **View on YouTube**, **View local file**,
-**Confirm match**, **Check this video** and **Console**. If no link exists,
-**Assign link** lets you paste it. The individual API check queries that ID,
+**Confirm match** and **Check this video**. Console is in General options or Settings.
+If no link exists, **Compare** lets you paste it. The individual API check queries that ID,
 not the whole channel, and confirms Uploaded only with technical identity evidence
 and complete processing. A quota error is neither a file issue nor confirmation.
 
@@ -201,10 +244,18 @@ may contain both deleted and retained files. Settings > Cleanup can configure
 automatic deletion and retention in minutes, hours or days after upload; allow
 enough time to review your videos.
 
-## Channel Tab
+## On YouTube Tab
 
 Opening the tab requests loading; Load channel also refreshes it. Loading requires
 connectivity and can take time for large channels.
+
+The header shows the linked channel avatar and name, loaded total and public,
+private and unlisted video counts. Filters do not change these totals. References
+without metadata are excluded from the total and table and reported separately.
+This does not confirm deletion from YouTube or change local-file verification. The
+timestamp shows the last query; Saved snapshot identifies older data when the
+live channel could not be queried. The summary adds no API requests. The local
+connection profile and Notices appear only on the On my computer tab.
 
 - Search by title, playlist or link.
 - Filter visibility, playlist and date. Date searches title or publication date;
@@ -212,32 +263,59 @@ connectivity and can take time for large channels.
 - Select a row for thumbnail, duration, visibility, publication and playlists.
 - Drag the splitter to resize the sidebar; scroll it when height is limited.
 
+In **Settings > On YouTube**, choose columns, reorder them by dragging or with the
+arrow buttons, and choose the selection color. Green is the default. Technical
+fields reuse queried data; `-` means unavailable in the channel snapshot. These
+settings do not change local-file identity verification.
+
 | Action | Result |
 | --- | --- |
-| Open / Play | Open the selected video in your browser. |
+| Play | Always-visible triangle beneath the video. Starts sidebar playback using the Settings > Playback session, without a separate Play button. Seeking and audio controls become available when actual player data arrives. |
+| Player left/right arrows | Go back or forward ten seconds. |
+| Seek bar | Jump to another position once the duration is available. |
+| Speaker and volume | Mute or adjust this video's sound only. |
+| Captions | Toggle available captions for the video. They start disabled in On YouTube. |
+| Play full screen | Move the same player to full screen with controls. Only this button changes the view; Play retains the panel. Escape, Exit full screen or Return to panel moves playback directly back to the sidebar without an intermediate window. |
+| Review access in Settings | Appears if private-video playback fails and opens Settings > Playback to review the session. |
+| Player stop | Stop the video; closing the window, changing videos or leaving On YouTube also stops it. |
+| Open / Open on YouTube | Open the selected video in your usual browser. |
 | YouTube | Open YouTube's home page. |
 | Share | After confirmation, set the first selected video to Unlisted and copy its link. |
+| Share from here (player icon) | Check Start at 1:23 to add `?t=83`; leave it unchecked for a normal link. Confirm Unlisted visibility; the link is copied only after API success. |
 | Visibility | Change visibility of selected channel videos. |
-| Move to playlist | Change one selected video's playlist; single selection required. |
+| Change playlist | Compact sidebar icon for one video; the icon beside the lock changes the playlist for all selected videos after confirmation. |
 | Duplicates | Find groups with sufficient fingerprints or original-file metadata. |
 | Delete | Delete selected YouTube videos after confirmation. |
 
 Use Ctrl or Shift for multiple selection. Check selection before channel deletion.
 Private videos use the browser session's permissions; the app's OAuth grant does
-not log that browser in. Duplicate detection does not accept equal date/duration
+not log that browser in. Manage the account in Settings > Playback, not in the
+player. Duplicate detection does not accept equal date/duration
 alone and can omit videos without sufficient metadata. Review candidates before
 deleting; editing a filter returns to the normal filtered list.
+
+Private videos load directly in YouTube so it can recognize the playback
+session. That account must have permission to watch; the app does not bypass
+YouTube restrictions. Custom controls wait for real playback data and do not
+simulate progress when loading or authorization fails. After this upgrade,
+close previous playback-session windows and reopen them from Settings if
+requested; the saved account is preserved.
 
 ## Settings
 
 | Tab | Options |
 | --- | --- |
 | General | Version, language, updates, Console, folder, extensions and subfolders. |
-| YouTube | OAuth JSON, wizard, visibility, category and playlist creation/selection. |
+| Connection | OAuth JSON, wizard, visibility, category and playlist creation/selection. |
 | Playback | Dedicated Chrome/Edge session for private-video comparison. |
 | Automation | Auto on startup, minimized startup, tray close, Windows startup, scan/stability intervals. |
 | Cleanup | Automatic deletion and retention value/unit. |
-| Library | Visible columns, ordering and defaults. |
+| On my computer | Local-file columns, ordering, defaults and selection color. |
+| On YouTube | Channel-video columns, ordering, defaults and selection color. |
+
+On my computer and On YouTube use the same editor: column checkboxes, dragging or arrows
+to reorder, defaults and selection color. Each table retains independent settings.
+These display changes do not query YouTube or modify its videos.
 
 Search finds sections by keywords. Save applies changes; language applies after restart.
 
@@ -276,8 +354,10 @@ authorization and database are under `%APPDATA%\YouTubeSync`.
 
 ## Troubleshooting
 
-Channel and folder combines your connected profile and active options. Now explains
-current work or problems and offers actionable buttons. Arrows retain your selected
+The profile emphasizes connection and channel in the first row, then folder and
+privacy, followed by category and playlist, with icons and tooltips instead of
+repeated labels. Notices explains
+current work or problems with navigation arrows but no file commands. Navigation retains your selected
 notice while it remains relevant; countdowns and checks do not reset selection.
 Routine activity does not rotate alongside unresolved problems. Quota pauses take
 priority; table refresh does not erase their explanation.

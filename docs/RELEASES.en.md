@@ -4,9 +4,9 @@
 
 ## Release Contract
 
-The first public release is **1.0**. Every stable Release includes:
+The first public release is **1.0**; the current version is **1.1**. Every stable Release includes:
 
-- `YouTubeSync-1.0-windows-x64-setup.exe`: complete installer, not a standalone app EXE.
+- `YouTubeSync-1.1-windows-x64-setup.exe`: complete installer, not a standalone app EXE.
 - `SHA256SUMS.txt`: installer digest.
 - Spanish/English notes describing features, changes and relevant limitations.
 
@@ -34,8 +34,9 @@ source, tests or packaging change on `main`, the workflow itself is introduced,
 or it is manually dispatched in Actions. Published versions are never overwritten;
 increment `APP_VERSION` for a new release.
 
-For 1.1, set `APP_VERSION` to `1.1`, update both changelogs and
-`docs/RELEASE_NOTES.md`, then publish source. The workflow creates `v1.1` at that
+For the next release, for example 1.2, set `APP_VERSION` to `1.2`, update both
+changelogs and `docs/RELEASE_NOTES.md`, then publish source. The workflow creates
+the corresponding tag (for example `v1.2`) at that
 commit and attaches the checked installer. Failed tests/installation prevent
 publication. No YouTube secrets are used.
 
@@ -59,7 +60,7 @@ in `%APPDATA%\YouTubeSync\updates`.
 
 ## Security and Maintenance
 
-GitHub digest verification is not Authenticode. Version 1.0 has no publisher-owned
+GitHub digest verification is not Authenticode. Versions 1.0 and 1.1 have no publisher-owned
 signing certificate; never advertise it as signed. Protect the publisher account
 and do not overwrite released assets. Never ask users to disable Windows security.
 

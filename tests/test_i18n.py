@@ -83,6 +83,9 @@ class LanguageTests(unittest.TestCase):
         text = "Subida manual solicitada para vídeo {prueba} 01.mp4."
         self.assertEqual(t(text), "Manual upload requested for vídeo {prueba} 01.mp4.")
         self.assertEqual(t("AHORA / 2 DE 4"), "NOW / 2 OF 4")
+        self.assertEqual(t("AVISOS / 2 DE 4"), "NOTICES / 2 OF 4")
+        self.assertEqual(t("Avisos"), "Notices")
+        self.assertEqual(t("Comprobar con YouTube"), "Check with YouTube")
         self.assertEqual(t("No se pudo comprobar YouTube: Sin conexion"), "Could not check YouTube: Disconnected")
         self.assertEqual(t("C:\\clips\\Subido.mp4"), "C:\\clips\\Subido.mp4")
         for source, destination in TEMPLATES:
@@ -130,7 +133,8 @@ class LanguageTests(unittest.TestCase):
         try:
             window.timer.stop()
             self.assertEqual(language(), "en")
-            self.assertEqual(window.tabs.tabText(1), "Channel")
+            self.assertEqual(window.tabs.tabText(0), "On my computer")
+            self.assertEqual(window.tabs.tabText(1), "On YouTube")
             table = window.video_table
             table.setRowCount(1)
             for column, value in ((0, "Subido.mp4"), (1, "Pendiente"), (4, "Subido")):

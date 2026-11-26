@@ -29,7 +29,7 @@ La compilación del código se explica en la [guía de desarrollo](DESARROLLO.md
 ## Primera configuracion
 
 1. Al abrir por primera vez aparece **Conectar mi canal**. Tambien puedes abrirlo
-   desde Ajustes > YouTube. Si ya tienes credenciales, pulsa **Ya tengo mi JSON OAuth**.
+   desde Ajustes > Conexión. Si ya tienes credenciales, pulsa **Ya tengo mi JSON OAuth**.
 2. El asistente te guia para crear tu proyecto de Google Cloud, activar YouTube
    Data API v3 y crear un cliente OAuth de tipo escritorio.
 3. Selecciona el JSON descargado. La app lo valida y conserva una copia bajo
@@ -68,24 +68,30 @@ el JSON ni el token de acceso en GitHub.
 | Control | Funcion |
 | --- | --- |
 | ON / OFF | Activa o pausa el modo automatico. |
-| Flecha hacia arriba | Solicita la subida de pendientes y activa el modo automatico. |
-| Stop | Solicita cancelar la subida actual y deja el automatico en OFF. |
-| Actualizar | Recarga configuracion y carpeta y comprueba la conexion a YouTube. |
+| ? | Abre las opciones generales y la lista de avisos; el menú no necesita una flecha aparte. |
+| Subir pendientes, sobre la tabla local | Solicita la cola de pendientes y activa el modo automático. |
+| Stop, sobre la tabla local | Cancela la cola o subida activa y deja el automático en OFF. |
+| Actualizar carpeta | Relee la carpeta local sin API. Su menú permite comprobar con YouTube expresamente. |
 | Engranaje | Abre Ajustes. |
 
 Los botones muestran su funcion al situar el raton encima. La cancelacion
 puede tardar hasta que termine la operacion de transferencia en curso.
 Una cancelacion no borra automaticamente un video remoto. Antes de reintentar,
 la app comprueba el canal; si YouTube sigue procesando el video, lo conserva.
-Los videos dudosos pueden revisarse y eliminarse manualmente desde Canal.
+Los videos dudosos pueden revisarse y eliminarse manualmente desde En YouTube.
 
-## Pestana Videos
+## Pestaña En mi equipo
+
+El perfil de conexión y el recuadro Avisos pertenecen a esta pestaña. Avisos solo
+incluye sus flechas de navegación: las acciones generales están arriba y las
+específicas del archivo están en su lateral. Elegir otro aviso no se deshace al
+actualizar la información en segundo plano.
 
 Muestra los archivos de la carpeta configurada. Por defecto aparecen Archivo,
 Tamaño, Creado y Estado, con iconos en las cabeceras y en cada estado.
 Pulsa una cabecera para ordenar por esa columna; los tamaños se comparan en bytes.
 
-En **Ajustes > Biblioteca** puedes marcar las columnas que quieres ver y cambiar
+En **Ajustes > En mi equipo** puedes marcar las columnas que quieres ver y cambiar
 su orden arrastrandolas o con las flechas. **Predeterminadas** recupera la vista
 inicial. Pulsa **Guardar** para aplicar los cambios; se recuerdan al reiniciar.
 Titulo y Ruta siguen disponibles aunque no se muestren inicialmente.
@@ -115,27 +121,68 @@ antiguedad y Comprobar y borrar consultan YouTube antes de eliminar la copia loc
 El borrado manual sin comprobar requiere aceptar expresamente su advertencia.
 
 Selecciona un archivo y usa Subir para solicitar su subida individual.
-Reintentar limpia su incidencia y vuelve a solicitar la subida. Abrir local
+Reintentar, en el lateral del archivo, limpia su incidencia y vuelve a solicitar la subida. Abrir local
 lo abre con el programa asociado de Windows. Actualizar carpeta fuerza un
 nuevo escaneo local.
 
+La cabecera contiene **ON/OFF**, la interrogación de **Opciones generales** y **Ajustes**. Sobre la tabla,
+**Subir pendientes** actúa sobre la cola; la subida individual está en el lateral.
+El icono Stop cancela la cola o transferencia activa. El botón de actualizar relee
+la carpeta sin API; su menú **Comprobar con YouTube** permite revisar la conexión
+remota respetando las pausas de cuota. Los iconos muestran una ayuda al pasar el ratón.
+
+Las pestañas están encima del perfil y Avisos. Al seleccionar un archivo aparece
+su vista previa lateral: ruta bajo el nombre, miniatura local y recuadros de estado,
+tamaño, fecha y duración. La duración usa los datos locales disponibles; si todavía
+no se puede leer, aparece «-». Puedes ampliar
+el panel arrastrando el separador. Reproducir carga el archivo local, con posición,
+saltos de diez segundos, volumen y apertura en el reproductor externo. Cambiar de
+archivo o pestaña detiene la reproducción; actualizar no reinicia un archivo sin cambios.
+El icono de pantalla en los controles abre pantalla completa con pausa, posición,
+saltos y volumen. Escape o Volver al panel conserva el punto de reproducción.
+Cerrar la ventana de pantalla completa o cambiar de archivo detiene la reproducción.
+El panel permite abrir su enlace de YouTube, si existe, e iniciar la comparación
+manual cuando corresponde, sin confirmar automáticamente la coincidencia.
+Los archivos en estado Pendiente no ofrecen la comprobación guiada.
+El botón de carpeta sobre la tabla abre siempre la ruta configurada en Ajustes,
+independientemente de la selección. **Localizar**, en el lateral, abre el Explorador y resalta el
+archivo seleccionado; sin selección está desactivado. Ninguno reproduce el vídeo.
+
+En ambas pestañas, el panel lateral solo aparece con una fila seleccionada.
+La flecha **Ocultar panel / Mostrar panel**, sobre la tabla,
+permite cerrarlo o recuperarlo sin perder la selección. Ocultar detiene la
+reproducción y devuelve todo el ancho a la tabla. Cada pestaña recuerda por separado
+esta elección y el ancho del panel mientras la app siga abierta; cambiar de fila,
+recargar o volver a la pestaña no deshace una ocultación manual. Sin selección,
+el botón está desactivado.
+
+Ambos laterales tienen las acciones dentro de su marco, fijas abajo aunque desplaces
+los datos. La posición, pausa, saltos y volumen están justo debajo del vídeo en
+ambas pestañas, antes de las fichas con iconos. En YouTube conserva además subtítulos,
+compartir y pantalla completa. Los botones usan colores suaves por función: verde para subir, reproducir
+o confirmar; rojo para borrar o detener; azul para consultar o abrir; ámbar para revisión
+y limpieza. Se mantienen las ayudas al pasar el ratón y las confirmaciones de seguridad.
+
 Antes de iniciar una subida nueva se lee la duracion local, sin consultar YouTube.
 Los videos de **menos de 30 segundos** quedan en **Revisar**; si Windows no puede
-leer su duracion tambien se pide revision. En el aviso o al pulsar Subir puedes
+leer su duracion tambien se pide revision. Al pulsar Revisar o Subir en el lateral puedes
 elegir **Autorizar y subir**, **Abrir local**, **Borrar local** o **Más tarde**.
 El borrado pide una confirmacion independiente. No se borran ni se suben por
 si solos. La autorizacion se recuerda al reiniciar, pero no se aplica a un archivo
 modificado. Los videos ya confirmados no vuelven a subirse ni necesitan esta revision.
 
-### Acciones de Ahora
+### Avisos y Acciones
 
-Ahora muestra acciones segun el aviso o archivo seleccionado, con hasta cinco
-botones y flechas para volver al aviso anterior o avanzar. Los iconos muestran
-su nombre al pasar el raton. Las acciones sobre archivos usan el archivo del aviso,
-no una seleccion distinta que hubiera antes.
+Avisos muestra información y conserva solo las flechas anterior/siguiente dentro del recuadro.
+También puedes elegir un aviso desde **Opciones generales > Avisos** en la cabecera.
+La interrogación ofrece conexión, cuota, revisión de pendientes y diagnóstico.
+Las acciones específicas están en la parte inferior fija del lateral del archivo:
+Subir, Reintentar, Revisar, Comparar, Comprobar, Localizar y Borrar local, según su estado.
+Siempre actúan sobre el archivo mostrado, aunque Avisos esté enseñando otro problema.
 
 En **Por verificar** puedes abrir **YouTube**, **Ver local**, **Confirmar coincidencia**,
-**Comprobar este video** o **Consola**. Si no hay enlace, **Asignar enlace** permite
+**Comprobar este video**. **Consola** está en Opciones generales o Ajustes.
+Si no hay enlace, **Comparar** permite
 pegarlo. La comprobacion individual consulta ese ID, no todo el canal, y solo
 cambia a Subido cuando obtiene las pruebas tecnicas y el procesamiento completo.
 Un error de cuota no convierte el archivo en una incidencia ni en un video confirmado.
@@ -191,7 +238,7 @@ Referencias: [limite del canal](https://support.google.com/youtube/answer/103834
 
 ### Limpieza de archivos locales
 
-La papelera de Videos permite borrar el archivo local seleccionado en cualquier
+La papelera de En mi equipo permite borrar el archivo local seleccionado en cualquier
 estado. Si no esta confirmado como subido, advierte que podrias perder la unica
 copia y exige pulsar **Borrar de todos modos**; **Cancelar** es la opcion inicial.
 Si figura como Subido, puedes elegir **Comprobar y borrar**, que verifica YouTube,
@@ -220,10 +267,19 @@ resultado: un lote puede tener archivos borrados y otros conservados.
 En Ajustes > Limpieza puedes activar la limpieza automatica y elegir minutos,
 horas o dias desde la subida. Empieza con un plazo que te permita revisar tus videos.
 
-## Pestana Canal
+## Pestaña En YouTube
 
 Al abrirla se solicita la carga del canal. Tambien puedes usar Cargar canal.
 La carga necesita conexion y puede tardar en canales grandes.
+
+La cabecera muestra la imagen y el nombre del canal vinculado, el total cargado
+y sus vídeos públicos, privados y ocultos. Los filtros no cambian esos totales.
+Las referencias para las que no hay metadatos quedan fuera del total y de la
+tabla y se indican aparte. Esto no confirma que se hayan eliminado de YouTube
+ni cambia la verificación de tus archivos locales.
+La fecha indica la última consulta; «Copia guardada» identifica datos anteriores
+cuando no se ha podido consultar YouTube. El resumen no añade consultas API.
+El perfil de conexión y «Avisos» pertenecen únicamente a la pestaña En mi equipo.
 
 - Busca por titulo, lista o enlace.
 - Filtra por privacidad, lista o fecha. La fecha busca coincidencias en titulo
@@ -232,21 +288,43 @@ La carga necesita conexion y puede tardar en canales grandes.
 - Arrastra el separador para cambiar el ancho del panel lateral.
 - Si falta altura, desplaza el panel lateral para acceder a todos sus datos.
 
+En **Ajustes > En YouTube** puedes elegir las columnas, arrastrarlas o usar las flechas
+para ordenar y cambiar el color de selección. Verde es el predeterminado. Los
+campos técnicos usan datos ya consultados; `-` indica que no están disponibles
+en la copia del canal. No cambian las pruebas de correspondencia de tus archivos.
+
 ### Acciones del canal
 
 | Accion | Resultado |
 | --- | --- |
-| Abrir / Reproducir | Abre el video seleccionado en tu navegador. |
+| Play | Triángulo siempre visible bajo el vídeo. Inicia la reproducción en el panel usando la sesión de Ajustes > Reproducción; no hay un botón Reproducir aparte. Los controles de posición y sonido se activan cuando llegan datos reales. |
+| Flechas izquierda/derecha del reproductor | Retrocede o avanza diez segundos. |
+| Barra de posición | Salta a otro momento del vídeo cuando se conoce su duración. |
+| Altavoz y volumen | Silencia o ajusta solo el sonido de este vídeo. |
+| Subtítulos | Activa o desactiva los disponibles para el vídeo. Empiezan desactivados en «En YouTube». |
+| Reproducir a pantalla completa | Mueve el mismo reproductor a pantalla completa con controles. Solo este botón cambia la vista; Reproducir mantiene el panel. Escape, salir de pantalla completa o Volver al panel devuelve el vídeo directamente al lateral, sin ventana intermedia. |
+| Revisar acceso en Ajustes | Aparece si falla un privado y abre Ajustes > Reproducción para revisar la sesión. |
+| Stop del reproductor | Detiene el vídeo. También se detiene al cerrar la ventana, cambiar de vídeo o salir de «En YouTube». |
+| Abrir / Abrir en YouTube | Abre el vídeo seleccionado en tu navegador habitual. |
 | YouTube | Abre la pagina principal de YouTube. |
 | Compartir | Tras confirmar, cambia el primer video seleccionado a Oculto y copia el enlace. |
+| Compartir desde aquí (icono del reproductor) | Puedes marcar «Iniciar en 1:23» para añadir `?t=83`; sin marcar, se copia el enlace normal. Se confirma el cambio a Oculto y solo se copia tras el éxito de la API. |
 | Privacidad | Cambia la privacidad de los videos seleccionados. |
-| Mover a lista | Cambia la lista de un video seleccionado; requiere seleccion individual. |
+| Cambiar lista | Icono pequeño en el lateral para un vídeo; junto al candado permite cambiar la lista de todos los seleccionados, con confirmación. |
 | Duplicados | Busca grupos con huella o metadatos de archivo suficientes. |
 | Borrar | Elimina de YouTube los videos seleccionados, previa confirmacion. |
 
 Para seleccionar varios videos usa Ctrl o Mayus. Comprueba la seleccion antes
 de borrar del canal. Un video privado se abre con los permisos de la sesion del
 navegador; la autorizacion OAuth de la app no inicia sesion en ese navegador.
+Gestiona la cuenta desde Ajustes > Reproducción, no desde el reproductor.
+
+Los privados se cargan directamente en YouTube para que reconozca la sesión de
+reproducción. Esa cuenta debe tener permiso para ver el vídeo; la app no evita
+restricciones de YouTube. Los controles propios esperan datos reales y no
+simulan progreso cuando la carga o la autorización falla. Tras instalar esta
+mejora, cierra las ventanas de la sesión de reproducción anterior y ábrela de
+nuevo desde Ajustes si se solicita; la cuenta guardada se conserva.
 
 La busqueda de duplicados no considera suficiente compartir fecha o duracion.
 Puede omitir videos que no tengan metadatos adecuados. Comprueba los resultados
@@ -257,11 +335,16 @@ antes de decidir que borrar. Edita un filtro para volver a la lista filtrada nor
 | Pestana | Opciones |
 | --- | --- |
 | General | Version, idioma, actualizaciones, consola, carpeta, extensiones e inclusion de subcarpetas. |
-| YouTube | JSON OAuth, asistente, privacidad, categoria y listas; permite crear listas. |
+| Conexión | JSON OAuth, asistente, privacidad, categoria y listas; permite crear listas. |
 | Reproducción | Gestionar la sesión de Chrome o Edge para ver privados durante la comparación. |
 | Automatizacion | Auto al arrancar, inicio minimizado, cierre a bandeja, inicio con Windows, intervalo y estabilidad. |
 | Limpieza | Borrado automatico y tiempo de conservacion con unidad. |
-| Biblioteca | Columnas visibles, orden y restauración de la vista predeterminada. |
+| En mi equipo | Columnas, orden, restauración y color de selección de los archivos locales. |
+| En YouTube | Columnas, orden, restauración y color de selección de los vídeos del canal. |
+
+En mi equipo y En YouTube usan el mismo editor: casillas de columnas, arrastrar o flechas
+para ordenar, restauración y color de selección. Cada tabla conserva su propia
+configuración. Cambiar estas opciones no consulta YouTube ni altera sus vídeos.
 
 El buscador localiza secciones por palabras clave. Los cambios se aplican al
 pulsar Guardar.
@@ -310,9 +393,10 @@ se guardan bajo `%APPDATA%\YouTubeSync`.
 
 ## Problemas habituales
 
-En la cabecera, Canal y carpeta reune el perfil conectado y las opciones activas.
-El panel Ahora muestra la operacion en curso o el problema que necesita atencion,
-con botones para resolverlo. Si hay varios avisos, la flecha permite recorrerlos
+El perfil destaca conexión y canal en la primera fila; debajo aparecen ruta y
+privacidad, seguidas de categoría y lista, con iconos y ayudas sin etiquetas repetidas.
+El panel Avisos muestra la operacion en curso o el problema que necesita atencion,
+con flechas de navegación pero sin acciones sobre archivos. Si hay varios avisos, las flechas permiten recorrerlos
 y mantiene tu eleccion mientras ese aviso siga vigente. Las comprobaciones y la
 cuenta atras no reinician la seleccion. Los mensajes rutinarios no se incluyen
 en la rotacion cuando hay problemas pendientes.

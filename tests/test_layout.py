@@ -40,6 +40,8 @@ class ResponsiveLayoutTests(unittest.TestCase):
         self.window.tabs.setCurrentIndex(1)
         self.window.tabs.blockSignals(False)
         self.window.show()
+        with patch.object(self.window, "refresh_channel"):
+            self.window.tab_changed(1)
 
     def tearDown(self):
         self.window._allow_exit = True
@@ -52,7 +54,15 @@ class ResponsiveLayoutTests(unittest.TestCase):
             self.app.processEvents()
             self.window.adjust_channel_layout()
 
+    def select_preview_video(self):
+        self.window.channel_videos = [{"id": "layout-video", "title": "Clip", "privacy": "private"}]
+        self.window.channel_table.setRowCount(1)
+        self.window.channel_table.setItem(0, 6, ui.table_item("https://youtu.be/layout-video"))
+        with patch.object(self.window, "fetch_thumbnail"):
+            self.window.channel_table.selectRow(0)
+
     def test_preview_fits_narrow_and_wide_windows(self):
+        self.select_preview_video()
         for width, height in ((940, 620), (1280, 780), (1920, 1080)):
             with self.subTest(size=(width, height)):
                 self.window.resize(width, height)
@@ -62,18 +72,18 @@ class ResponsiveLayoutTests(unittest.TestCase):
                 self.assertLessEqual(scroll.widget().width(), scroll.viewport().width())
                 self.assertAlmostEqual(thumb.height(), thumb.width() * 9 / 16, delta=2)
                 pills = self.window.channel_info_pills
-                self.assertGreaterEqual(pills[0].y(), thumb.y() + thumb.height())
-                buttons = scroll.widget().findChildren(ui.QPushButton)
-                play = next(button for button in buttons if button.text() == "Reproducir")
-                self.assertGreaterEqual(play.y(), max(p.y() + p.height() for p in pills))
-                scroll.ensureWidgetVisible(play)
+                playback = self.window.channel_playback
+                self.assertGreaterEqual(pills[0].y(), playback.y() + playback.height())
+                play = playback.transport.toggle
                 self.app.processEvents()
-                self.assertTrue(scroll.viewport().rect().contains(
-                    play.mapTo(scroll.viewport(), play.rect().center())))
+                self.assertFalse(playback.transport.isHidden())
+                self.assertTrue(play.isEnabled())
+                self.assertTrue(scroll.widget().isAncestorOf(play))
                 self.assertTrue(self.window.channel_table.isColumnHidden(6))
                 self.assertGreaterEqual(self.window.channel_table.height(), 100)
 
     def test_dragging_splitter_reflows_pills(self):
+        self.select_preview_video()
         self.window.resize(1600, 1000)
         self.settle()
         self.window.channel_splitter.setSizes([1000, 330])
@@ -91,9 +101,10 @@ class ResponsiveLayoutTests(unittest.TestCase):
         self.assertEqual(thumb.sizeHint(), hint)
 
     def test_long_metadata_remains_inside_preview(self):
+        self.select_preview_video()
         self.window.resize(940, 620)
         self.window.channel_preview_title.setText("Un titulo de video largo " * 8)
-        self.window.channel_preview_playlist.setText("Lista\n" + "Lista de reproduccion larga " * 10)
+        self.window.channel_preview_playlist.setText("Lista de reproduccion larga " * 10)
         self.settle()
         scroll = self.window.channel_preview_scroll
         self.assertLessEqual(scroll.widget().width(), scroll.viewport().width())
@@ -246,7 +257,7 @@ class ResponsiveLayoutTests(unittest.TestCase):
         dialog = self.window.settings_dialog
         dialog.settings_search.setText("conectar")
         tabs = dialog.findChild(ui.QTabWidget)
-        self.assertEqual(tabs.tabText(tabs.currentIndex()), "YouTube")
+        self.assertEqual(tabs.tabText(tabs.currentIndex()), "Conexión")
         dialog.close()
 
 

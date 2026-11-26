@@ -97,7 +97,8 @@ class DiagnosticTests(unittest.TestCase):
         self.buffer.append("Operacion: Transferir\nArchivo: clip.mp4\nHttpError 403: quotaExceeded", "Subida", "ERROR")
         self.window.copy_report()
         report = self.app.clipboard().text()
-        self.assertIn("YouTubeSync 1.0", report)
+        from youtube_sync_version import APP_VERSION
+        self.assertIn(f"YouTubeSync {APP_VERSION}", report)
         self.assertIn("Operacion: Transferir", report)
         self.assertIn("Archivo: clip.mp4", report)
 
@@ -176,7 +177,7 @@ class DiagnosticIntegrationTests(unittest.TestCase):
     settle = fixture.ResponsiveLayoutTests.settle
 
     def test_main_tabs_only_contain_videos_and_channel(self):
-        self.assertEqual([self.window.tabs.tabText(index) for index in range(self.window.tabs.count())], ["Videos", "Canal"])
+        self.assertEqual([self.window.tabs.tabText(index) for index in range(self.window.tabs.count())], ["En mi equipo", "En YouTube"])
         self.assertFalse(hasattr(self.window, "build_console_page"))
 
     def test_settings_console_button_opens_a_separate_reusable_window(self):

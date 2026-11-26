@@ -4,9 +4,9 @@
 
 ## Contrato de una publicación
 
-La primera versión pública es **1.0**. Cada Release estable debe contener:
+La primera versión pública es **1.0**; la versión actual es **1.1**. Cada Release estable debe contener:
 
-- `YouTubeSync-1.0-windows-x64-setup.exe`: instalador completo, no el EXE suelto.
+- `YouTubeSync-1.1-windows-x64-setup.exe`: instalador completo, no el EXE suelto.
 - `SHA256SUMS.txt`: huella del instalador.
 - Notas en español e inglés con funciones, cambios y limitaciones relevantes.
 
@@ -34,8 +34,9 @@ el código, pruebas o empaquetado en `main`, cuando se incorpora el propio flujo
 al ejecutarlo manualmente desde Actions. Si la versión ya está publicada no la
 sobrescribe: para otra publicación hay que incrementar `APP_VERSION`.
 
-Para preparar 1.1, cambia `APP_VERSION` a `1.1`, actualiza ambos changelogs y
-`docs/RELEASE_NOTES.md`, y publica el código. El flujo crea la etiqueta `v1.1`
+Para preparar una versión posterior, por ejemplo 1.2, cambia `APP_VERSION` a `1.2`,
+actualiza ambos changelogs y `docs/RELEASE_NOTES.md`, y publica el código.
+El flujo crea la etiqueta correspondiente (por ejemplo `v1.2`)
 en ese commit y adjunta el instalador comprobado. Un fallo de pruebas o de
 instalación impide publicar la Release. No se usan secretos de YouTube.
 
@@ -61,7 +62,7 @@ desde la aplicación si estaba activada. Las descargas están en
 ## Seguridad y mantenimiento
 
 La integridad contra el digest de GitHub no sustituye Authenticode. La primera
-versión no tiene certificado de firma propio; no la anuncies como firmada.
+versión y la 1.1 no tienen certificado de firma propio; no las anuncies como firmadas.
 Protege la cuenta de publicación y no sobrescribas assets de versiones publicadas.
 No indiques a los usuarios que desactiven las protecciones de Windows.
 

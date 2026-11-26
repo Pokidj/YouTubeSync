@@ -1,5 +1,6 @@
 import os
 import queue
+import subprocess
 import sys
 import threading
 import urllib.request
@@ -7,7 +8,7 @@ import webbrowser
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QRect, QSize, QTimer, Qt, Signal, QObject
+from PySide6.QtCore import QEvent, QRect, QSize, QTimer, Qt, Signal, QObject, QSignalBlocker
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -24,8 +25,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QLayout,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -54,21 +53,29 @@ import youtube_sync_engine as engine
 from youtube_sync_setup import SetupWizard
 from youtube_sync_update_ui import UpdatePanel
 from youtube_sync_version import APP_ID, APP_VERSION
-from youtube_sync_icons import app_icon, standard_icon, decorate_buttons
+from youtube_sync_icons import app_icon, standard_icon, decorate_buttons, button_tone, button_tone_styles
 from youtube_sync_diagnostics import DiagnosticBuffer, DiagnosticWindow, redact_secrets
 from youtube_sync_manual import quota_console_url
 from youtube_sync_manual_ui import ManualConfirmationDialog
 from youtube_sync_help import install_button_help
 from youtube_sync_browser_session import find_browser, open_playback_session
 from youtube_sync_install import launch_installer
+from youtube_sync_channel_ui import ChannelOverview, ChannelPlayback
+from youtube_sync_channel_data import split_gallery_rows
+from youtube_sync_channel_columns import CHANNEL_COLUMNS, DEFAULT_CHANNEL_COLUMNS, normalize_channel_columns, duration_sort_value
+from youtube_sync_table_settings import TableSettingsEditor, table_selection_style, settings_search_key
 from youtube_sync_library import (LIBRARY_COLUMNS, DEFAULT_LIBRARY_COLUMNS, MEDIA_COLUMNS, STATUS_ICONS,
                                   normalize_library_columns, media_cells)
 from youtube_sync_local_media import LocalMediaLoader
+from youtube_sync_local_player import media_time
+from youtube_sync_local_preview import LocalPreview
+from youtube_sync_preview_ui import PreviewInfoPill
+from youtube_sync_preview_visibility import PreviewVisibility
 from youtube_sync_cleanup import scan_short_videos, delete_short_videos, delete_local_files
 from youtube_sync_i18n import LANGUAGES, set_language, t
 from youtube_sync_i18n_widgets import (
     QAction, QCheckBox, QComboBox, QDialog, QFileDialog, QInputDialog, QLabel,
-    QLineEdit, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
+    QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton,
     QStyledItemDelegate, QTableWidget, QTableWidgetItem, QTabWidget, QToolButton, QWidget, RawLabel,
 )
 
@@ -155,6 +162,7 @@ class PreviewThumbnail(QWidget):
 
 class ChannelLoader(QObject):
     finished = Signal(object, object)
+    profile_ready = Signal(object)
     failed = Signal(str)
     cached = Signal(str)
 
@@ -170,11 +178,16 @@ class ChannelLoader(QObject):
         try:
             client = engine.YouTubeClient(self.store, self.config, lambda _text: None)
             videos, playlists = client.channel_gallery()
+            self.profile_ready.emit(dict(client._channel_info or {}, unavailable_count=len(client.gallery_unavailable_ids)))
             self.finished.emit(videos, playlists)
         except Exception as exc:
             if engine.is_youtube_quota_error(exc):
                 snapshot = self.store.service_cache(engine.api_scope(self.config.client_secret_path), "gallery")
+                if (snapshot and self.config.connected_channel_id
+                        and snapshot["data"].get("channel", {}).get("id") != self.config.connected_channel_id):
+                    snapshot = None
                 if snapshot:
+                    self.profile_ready.emit(snapshot["data"].get("channel", {}))
                     self.finished.emit(snapshot["data"]["videos"], snapshot["data"]["playlists"])
                     self.cached.emit(snapshot["checked_at"])
                     return
@@ -210,10 +223,17 @@ class SettingsDialog(QWidget):
 
         self.settings_search = QLineEdit()
         self.settings_search.setPlaceholderText("Buscar ajuste: carpeta, columnas, privacidad, auto, limpieza...")
+        self.settings_search.setClearButtonEnabled(True)
         layout.addWidget(self.settings_search)
+        self.settings_empty = QLabel("No hay ajustes que coincidan con la búsqueda.")
+        self.settings_empty.setObjectName("Muted")
+        self.settings_empty.setWordWrap(True)
+        self.settings_empty.hide()
+        layout.addWidget(self.settings_empty)
 
         self.settings_sections = []
         tabs = QTabWidget()
+        self.settings_tabs = tabs
         layout.addWidget(tabs, 1)
 
         def tab_page(name: str) -> tuple[QWidget, QVBoxLayout]:
@@ -232,37 +252,32 @@ class SettingsDialog(QWidget):
             return frame
 
         general_page, general_layout = tab_page("General")
-        youtube_page, youtube_tab_layout = tab_page("YouTube")
+        youtube_page, youtube_tab_layout = tab_page("Conexión")
         playback_page, playback_layout = tab_page("Reproducción")
+        self.playback_settings_page = playback_page
         automation_page, automation_tab_layout = tab_page("Automatizacion")
         cleanup_page, cleanup_tab_layout = tab_page("Limpieza")
-        library_page, library_layout = tab_page("Biblioteca")
+        library_page, library_layout = tab_page("En mi equipo")
 
-        columns = tracked_section(library_layout, "Columnas de la biblioteca",
-                                  "archivo titulo tamaño creado estado ruta columnas orden miniatura calidad resolucion resolución duracion duración fps")
-        column_row = QHBoxLayout()
-        self.library_columns = QListWidget()
-        self.library_columns.setIconSize(QSize(20, 20))
-        self.library_columns.setMinimumHeight(292)
-        self.library_columns.setDragDropMode(QAbstractItemView.InternalMove)
-        self.library_columns.setDefaultDropAction(Qt.MoveAction)
-        self.library_columns.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.fill_library_columns(config.library_columns)
-        column_row.addWidget(self.library_columns, 1)
-        column_tools = QVBoxLayout()
-        for delta, icon, label in ((-1, "chevron-up", "Mover columna arriba"), (1, "chevron-down", "Mover columna abajo")):
-            button = QPushButton(app_icon(icon), "")
-            button.setToolTip(label)
-            button.setAccessibleName(label)
-            button.clicked.connect(lambda _checked=False, delta=delta: self.move_library_column(delta))
-            column_tools.addWidget(button)
-        column_tools.addStretch(1)
-        column_row.addLayout(column_tools)
-        columns.layout().addLayout(column_row, 1)
-        reset_columns = QPushButton(app_icon("rotate-ccw"), "Predeterminadas")
-        reset_columns.clicked.connect(lambda: self.fill_library_columns(list(DEFAULT_LIBRARY_COLUMNS)))
-        columns.layout().addWidget(reset_columns, 0, Qt.AlignRight)
+        columns = tracked_section(library_layout, "Columnas de archivos",
+                                  "en mi equipo local archivos subidas biblioteca library computer archivo titulo tamaño creado estado ruta columnas orden miniatura calidad resolucion resolución duracion duración fps color selección selection color")
+        self.library_editor = TableSettingsEditor(LIBRARY_COLUMNS, normalize_library_columns(config.library_columns),
+                                                 DEFAULT_LIBRARY_COLUMNS, config.library_selection_color,
+                                                 {"resolution": "Dimensiones reales del archivo, leidas por Windows.",
+                                                  "thumbnail": "Miniatura del Explorador de Windows, si el formato dispone de ella."})
+        self.library_columns = self.library_editor.columns
+        self.library_color = self.library_editor.color
+        columns.layout().addWidget(self.library_editor, 1)
         library_layout.setStretch(0, 1)
+
+        channel_page, channel_layout = tab_page("En YouTube")
+        channel_section = tracked_section(channel_layout, "Columnas de YouTube", "en youtube canal channel columnas orden miniatura duración privacidad listas publicado calidad resolución fps tamaño id selección color verde selection color")
+        self.channel_editor = TableSettingsEditor(CHANNEL_COLUMNS, normalize_channel_columns(config.channel_columns),
+                                                 DEFAULT_CHANNEL_COLUMNS, config.channel_selection_color)
+        self.channel_columns = self.channel_editor.columns
+        self.channel_color = self.channel_editor.color
+        channel_section.layout().addWidget(self.channel_editor, 1)
+        channel_layout.setStretch(0, 1)
 
         app_section = tracked_section(general_layout, "Aplicacion", "version actualizacion updater consola diagnostico errores registro logs copiar informe idioma language español english")
         app_layout = app_section.layout()
@@ -367,11 +382,11 @@ class SettingsDialog(QWidget):
         self.run_at_startup.setChecked(bool(config.run_at_startup))
         automation_layout.addWidget(self.run_at_startup)
         self.scan_interval = QSpinBox()
-        self.scan_interval.setRange(2, 3600)
+        self.scan_interval.setRange(2, 86400)
         self.scan_interval.setValue(int(config.scan_interval_seconds))
         automation_layout.addLayout(self.field_row("Revisar cada (segundos)", self.scan_interval))
         self.stable_wait = QSpinBox()
-        self.stable_wait.setRange(2, 600)
+        self.stable_wait.setRange(1, 86400)
         self.stable_wait.setValue(int(config.stable_wait_seconds))
         automation_layout.addLayout(self.field_row("Esperar estabilidad (segundos)", self.stable_wait))
         automation_tab_layout.addStretch(1)
@@ -392,6 +407,10 @@ class SettingsDialog(QWidget):
         cleanup_row.addWidget(self.cleanup_delay, 1)
         cleanup_row.addWidget(self.cleanup_unit, 1)
         cleanup_layout.addLayout(cleanup_row)
+        self.auto_delete.toggled.connect(self.cleanup_delay.setEnabled)
+        self.auto_delete.toggled.connect(self.cleanup_unit.setEnabled)
+        self.cleanup_delay.setEnabled(self.auto_delete.isChecked())
+        self.cleanup_unit.setEnabled(self.auto_delete.isChecked())
         cleanup_tab_layout.addStretch(1)
         self.settings_search.textChanged.connect(lambda text, tabs=tabs: self.filter_settings_sections(text, tabs))
 
@@ -421,33 +440,22 @@ class SettingsDialog(QWidget):
             QMessageBox.warning(self, "Sesión de reproducción", str(exc))
 
     def fill_library_columns(self, visible: list[str]) -> None:
-        self.library_columns.clear()
-        visible = normalize_library_columns(visible)
-        definitions = {key: (label, icon) for key, label, icon in LIBRARY_COLUMNS}
-        for key in visible + [key for key in definitions if key not in visible]:
-            label, icon = definitions[key]
-            item = QListWidgetItem(app_icon(icon), label)
-            item.setData(Qt.UserRole, key)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
-            item.setCheckState(Qt.Checked if key in visible else Qt.Unchecked)
-            item.setSizeHint(QSize(0, 28))
-            if key == "resolution":
-                item.setToolTip("Dimensiones reales del archivo, leidas por Windows.")
-            elif key == "thumbnail":
-                item.setToolTip("Miniatura del Explorador de Windows, si el formato dispone de ella.")
-            self.library_columns.addItem(item)
-        self.library_columns.setCurrentRow(0)
+        self.library_editor.fill(normalize_library_columns(visible))
 
     def move_library_column(self, delta: int) -> None:
-        row = self.library_columns.currentRow()
-        target = row + delta
-        if row >= 0 and 0 <= target < self.library_columns.count():
-            self.library_columns.insertItem(target, self.library_columns.takeItem(row))
-            self.library_columns.setCurrentRow(target)
+        self.library_editor.move_column(delta)
 
     def selected_library_columns(self) -> list[str]:
-        return [self.library_columns.item(row).data(Qt.UserRole) for row in range(self.library_columns.count())
-                if self.library_columns.item(row).checkState() == Qt.Checked]
+        return self.library_editor.selected_columns()
+
+    def fill_channel_columns(self, visible):
+        self.channel_editor.fill(normalize_channel_columns(visible))
+
+    def move_channel_column(self, delta):
+        self.channel_editor.move_column(delta)
+
+    def selected_channel_columns(self):
+        return self.channel_editor.selected_columns()
 
     def section(self, title: str) -> QFrame:
         frame = QFrame()
@@ -465,15 +473,19 @@ class SettingsDialog(QWidget):
         super().closeEvent(event)
 
     def filter_settings_sections(self, query: str, tabs: QTabWidget) -> None:
-        text = query.strip().casefold()
-        first_match = None
+        words = settings_search_key(query).split()
+        matches = set()
         for frame, tab_index, terms in getattr(self, "settings_sections", []):
-            visible = not text or text in terms
+            searchable = settings_search_key(terms)
+            visible = all(word in searchable for word in words)
             frame.setVisible(visible)
-            if visible and first_match is None:
-                first_match = tab_index
-        if text and first_match is not None and tabs.currentIndex() != first_match:
-            tabs.setCurrentIndex(first_match)
+            if visible:
+                matches.add(tab_index)
+        self.settings_empty.setVisible(bool(words) and not matches)
+        for index in range(tabs.count()):
+            tabs.setTabEnabled(index, not words or not matches or index in matches)
+        if matches and tabs.currentIndex() not in matches:
+            tabs.setCurrentIndex(min(matches))
 
     def path_row(self, parent: QVBoxLayout, label: str, value: str, callback) -> QLineEdit:
         edit = QLineEdit(value)
@@ -579,7 +591,11 @@ class SettingsDialog(QWidget):
     def save(self) -> None:
         columns = self.selected_library_columns()
         if not columns:
-            QMessageBox.warning(self, "Biblioteca", "Selecciona al menos una columna para la biblioteca.")
+            QMessageBox.warning(self, "En mi equipo", "Selecciona al menos una columna de archivos locales.")
+            return
+        channel_columns = self.selected_channel_columns()
+        if not channel_columns:
+            QMessageBox.warning(self, "En YouTube", "Selecciona al menos una columna de YouTube.")
             return
         oauth = self.oauth.text().strip()
         if oauth:
@@ -609,6 +625,9 @@ class SettingsDialog(QWidget):
         self.config.auto_delete_after_hours = int(self.cleanup_delay.value())
         self.config.auto_delete_after_unit = self.cleanup_unit.currentText()
         self.config.library_columns = columns
+        self.config.channel_columns = channel_columns
+        self.config.channel_selection_color = self.channel_color.currentData()
+        self.config.library_selection_color = self.library_color.currentData()
         self.config.language = self.language_combo.currentData() or "es"
         try:
             self.store.save_config(self.config)
@@ -638,7 +657,7 @@ def problem_guidance(message: str, context: str = "Operacion", target: str = "")
     text = message.casefold()
     if (target or context == "Subida") and any(word in text for word in ("cancelad", "cancelled", "canceled")):
         return Guidance("Subida cancelada", "El archivo se conserva. No se iniciara otra transferencia sin tu autorizacion.",
-                        "info", (("Reintentar video", "retry_video"), ("Consola", "console")) if target else (("Videos", "videos"),), target)
+                        "info", (("Reintentar video", "retry_video"), ("Consola", "console")) if target else (("En mi equipo", "videos"),), target)
     if any(word in text for word in ("oauth", "invalid_grant", "invalid_scope", "unauthorized", "401", "credencial", "autorizacion")):
         return Guidance("Revisa la conexion", "Autoriza de nuevo tu canal con Google o revisa el JSON OAuth en Ajustes.",
                         "error", (("Conectar canal", "connect"), ("Ajustes", "youtube_settings")))
@@ -653,19 +672,19 @@ def problem_guidance(message: str, context: str = "Operacion", target: str = "")
                         "warning", (("Reintentar video", "retry_video") if target else ("Comprobar", "refresh"), ("Consola", "console")), target)
     if any(word in text for word in ("carpeta", "ruta", "file not found", "no such file", "no existe el archivo")):
         return Guidance("Revisa carpeta o archivo", "La ruta no esta disponible. Comprueba que la unidad este conectada y que la carpeta elegida exista.",
-                        "error", (("Carpeta", "folder_settings"), ("Videos", "videos")), target)
+                        "error", (("Carpeta", "folder_settings"), ("En mi equipo", "videos")), target)
     detail = "Revisa el motivo en Consola. El archivo no se volvera a subir por si solo." if target else "Consulta el detalle en Consola y revisa los ajustes antes de repetir la accion."
     return Guidance(f"{context}: necesita revision", detail, "warning",
                     (("Revisar video", "videos") if target else ("Ajustes", "settings"), ("Consola", "console")), target)
 
 
 class Card(QFrame):
-    def __init__(self, title: str, with_detail: bool = True) -> None:
+    def __init__(self, title: str = "", with_detail: bool = True) -> None:
         super().__init__()
         self.setObjectName("Card")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)
-        self.title = QLabel(title.upper())
+        self.title = QLabel(title.upper(), self)
         self.title.setObjectName("CardTitle")
         self.value = QLabel("-")
         self.value.setObjectName("CardValue")
@@ -679,7 +698,10 @@ class Card(QFrame):
             self.detail.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         for label in (self.title, self.value):
             label.setTextFormat(Qt.PlainText)
-        layout.addWidget(self.title)
+        if title:
+            layout.addWidget(self.title)
+        else:
+            self.title.hide()
         layout.addWidget(self.value)
         if self.detail is not None:
             self.detail.setTextFormat(Qt.PlainText)
@@ -812,6 +834,12 @@ class MainWindow(QMainWindow):
         self.thumbnail_pool_started = False
         self.video_rows: dict[int, dict] = {}
         self.channel_videos: list[dict] = []
+        self.channel_profile = {}
+        self.channel_loaded = False
+        self.channel_unavailable_count = 0
+        self.channel_checked_at = ""
+        self.channel_cached = False
+        self.channel_playlist_running = False
         self.channel_rows_by_id: dict[int, dict] = {}
         self.channel_playlists_by_label: dict[str, str] = {"Ninguna": ""}
         self.channel_filter_playlists_by_label: dict[str, str | None] = {"Todas": None, "Sin lista": ""}
@@ -849,8 +877,9 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self.process_events)
         self.timer.start(80)
 
-    def action_button(self, text: str, icon: QStyle.StandardPixmap | QIcon | None = None, danger: bool = False, primary: bool = False) -> QPushButton:
+    def action_button(self, text: str, icon: QStyle.StandardPixmap | QIcon | None = None, danger: bool = False, primary: bool = False, tone: str = "") -> QPushButton:
         button = QPushButton(text)
+        button.setAutoDefault(False)
         button.setToolTip(text)
         button.setAccessibleName(text)
         if icon is not None:
@@ -860,10 +889,11 @@ class MainWindow(QMainWindow):
             button.setObjectName("DangerButton")
         elif primary:
             button.setObjectName("PrimaryButton")
+        button_tone(button, tone or ("danger" if danger else "success" if primary else ""))
         return button
 
-    def icon_button(self, tooltip: str, icon: QStyle.StandardPixmap | QIcon, danger: bool = False, primary: bool = False) -> QPushButton:
-        button = self.action_button("", icon, danger=danger, primary=primary)
+    def icon_button(self, tooltip: str, icon: QStyle.StandardPixmap | QIcon, danger: bool = False, primary: bool = False, tone: str = "") -> QPushButton:
+        button = self.action_button("", icon, danger=danger, primary=primary, tone=tone)
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip)
         button.setMinimumWidth(46)
@@ -886,7 +916,10 @@ class MainWindow(QMainWindow):
 
         header = QHBoxLayout()
         logo = QLabel()
-        logo.setPixmap(QIcon(str(asset_path("youtube-sync-logo.png"))).pixmap(58, 58))
+        logo.setObjectName("AppLogo")
+        logo.setFixedSize(64, 64)
+        logo.setAlignment(Qt.AlignCenter)
+        logo.setPixmap(QIcon(str(asset_path("youtube-sync-logo.svg"))).pixmap(64, 64))
         header.addWidget(logo)
         title_box = QVBoxLayout()
         title = QLabel("YouTubeSync")
@@ -901,47 +934,53 @@ class MainWindow(QMainWindow):
 
         self.auto_btn = QPushButton()
         self.auto_btn.clicked.connect(self.toggle_auto)
-        self.upload_btn = QToolButton()
-        self.upload_btn.setText("")
-        self.upload_btn.setToolTip("Subir pendientes")
-        self.polish_header_tool(self.upload_btn, app_icon("arrow-up"))
-        self.upload_btn.clicked.connect(self.upload_pending)
-        self.cancel_btn = QToolButton()
-        self.cancel_btn.setText("")
-        self.cancel_btn.setToolTip("Cancelar subida actual")
-        self.polish_header_tool(self.cancel_btn, app_icon("square"))
-        self.cancel_btn.clicked.connect(self.cancel_upload)
-        self.refresh_btn = QToolButton()
-        self.refresh_btn.setText("")
-        self.refresh_btn.setToolTip("Actualizar")
-        self.polish_header_tool(self.refresh_btn, app_icon("refresh-cw"))
-        self.refresh_btn.clicked.connect(self.request_remote_refresh)
+        self.general_options_button = QToolButton()
+        self.general_options_button.setToolTip("Opciones generales")
+        self.general_options_button.setAccessibleName("Opciones generales")
+        self.polish_header_tool(self.general_options_button, app_icon("circle-question-mark"))
+        self.general_options_button.setPopupMode(QToolButton.InstantPopup)
+        self.general_options_menu = QMenu(self.general_options_button)
+        self.general_options_menu.aboutToShow.connect(lambda: self.build_general_menu(self.general_options_menu))
+        self.general_options_button.setMenu(self.general_options_menu)
         self.settings_btn = QToolButton()
         self.settings_btn.setText("")
         self.settings_btn.setToolTip("Ajustes")
         self.polish_header_tool(self.settings_btn, app_icon("settings"))
         self.settings_btn.clicked.connect(self.open_settings)
-        for button in (self.auto_btn, self.upload_btn, self.cancel_btn, self.refresh_btn, self.settings_btn):
-            header.addWidget(button)
+        self.header_actions = QWidget()
+        self.header_actions.setObjectName("HeaderActions")
+        header_buttons = QHBoxLayout(self.header_actions)
+        header_buttons.setContentsMargins(0, 0, 0, 0)
+        header_buttons.setSpacing(8)
+        for button in (self.auto_btn, self.general_options_button, self.settings_btn):
+            header_buttons.addWidget(button)
+        header.addWidget(self.header_actions)
         main.addLayout(header)
 
-        cards = QGridLayout()
-        self.state_card = Card("Canal y carpeta", with_detail=False)
+        self.video_context = QWidget()
+        cards = QGridLayout(self.video_context)
+        cards.setContentsMargins(0, 0, 0, 0)
+        self.state_card = Card(with_detail=False)
         self.state_connection_icon = QLabel()
         self.state_connection_icon.setFixedSize(18, 18)
         self.state_card.layout().removeWidget(self.state_card.value)
-        connection_row = QHBoxLayout()
+        self.state_card.value.setObjectName("ProfileLeadValue")
+        self.connection_field = QWidget()
+        self.connection_field.setObjectName("ProfileField")
+        connection_row = QHBoxLayout(self.connection_field)
+        connection_row.setContentsMargins(0, 0, 0, 0)
         connection_row.setSpacing(8)
         connection_row.addWidget(self.state_connection_icon)
         connection_row.addWidget(self.state_card.value, 1)
-        self.state_card.layout().insertLayout(1, connection_row)
         self.profile_fields = []
         profile_grid = QGridLayout()
+        self.profile_grid = profile_grid
         profile_grid.setHorizontalSpacing(18)
         profile_grid.setVerticalSpacing(8)
         profile_grid.setColumnStretch(0, 1)
         profile_grid.setColumnStretch(1, 1)
         self.state_card.layout().addLayout(profile_grid)
+        profile_grid.addWidget(self.connection_field, 0, 0)
 
         def profile_field(name: str, icon: str, color: str, grid_row: int, column: int, span: int = 1) -> ElidedLabel:
             field = QWidget()
@@ -963,56 +1002,45 @@ class MainWindow(QMainWindow):
             self.profile_fields.append(value)
             return value
 
-        self.profile_channel = profile_field("Canal", "user-round", "#ff4c68", 0, 0)
-        self.profile_privacy = profile_field("Privacidad", "lock", "#a8b2c5", 0, 1)
-        self.profile_folder = profile_field("Carpeta", "folder-open", "#56b6ff", 1, 0, 2)
+        self.profile_channel = profile_field("Canal", "user-round", "#ff4c68", 0, 1)
+        self.profile_channel.setObjectName("ProfileLeadValue")
+        self.profile_folder = profile_field("Carpeta", "folder-open", "#56b6ff", 1, 0)
+        self.profile_privacy = profile_field("Privacidad", "lock", "#a8b2c5", 1, 1)
         self.profile_category = profile_field("Categoria", "tag", "#e8b85b", 2, 0)
         self.profile_playlist = profile_field("Lista", "list-video", "#5bd8b7", 2, 1)
-        self.guidance_card = Card("Ahora")
+        self.guidance_card = Card("Avisos")
         self.guidance_card.setObjectName("GuidanceCard")
         self.guidance_card.value.setObjectName("GuidanceValue")
+        self.guidance_card.value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.guidance_card.detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.guidance_target = QLabel()
         self.guidance_target.setObjectName("CardDetail")
         self.guidance_target.setMinimumWidth(0)
         self.guidance_target.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.guidance_target.setTextFormat(Qt.PlainText)
         self.guidance_card.layout().insertWidget(2, self.guidance_target)
-        guidance_tools = QHBoxLayout()
-        self.guidance_buttons = []
-        for index in range(5):
-            button = self.action_button("")
-            button.setObjectName("GuidanceAction")
-            if index > 0:
-                button.setObjectName("GuidanceTool")
-                button.setFixedWidth(38)
-            button.clicked.connect(lambda checked=False, slot=index: self.run_guidance_action(slot))
-            guidance_tools.addWidget(button)
-            self.guidance_buttons.append(button)
-        guidance_tools.addStretch(1)
+        notice_navigation = QHBoxLayout()
+        notice_navigation.addStretch(1)
         self.guidance_previous = self.icon_button("Aviso anterior", app_icon("arrow-left"))
-        self.guidance_previous.setObjectName("GuidanceTool")
-        self.guidance_previous.setFixedWidth(38)
-        self.guidance_previous.clicked.connect(lambda: self.next_guidance(-1))
-        guidance_tools.addWidget(self.guidance_previous)
+        self.guidance_previous.setFixedSize(38, 36)
+        self.guidance_previous.clicked.connect(lambda _checked=False: self.next_guidance(-1))
         self.guidance_next = self.icon_button("Siguiente aviso", app_icon("arrow-right"))
-        self.guidance_next.setObjectName("GuidanceTool")
-        self.guidance_next.setFixedWidth(38)
-        self.guidance_next.clicked.connect(lambda: self.next_guidance())
-        guidance_tools.addWidget(self.guidance_next)
-        self.guidance_card.layout().addLayout(guidance_tools)
+        self.guidance_next.setFixedSize(38, 36)
+        self.guidance_next.clicked.connect(lambda _checked=False: self.next_guidance())
+        notice_navigation.addWidget(self.guidance_previous)
+        notice_navigation.addWidget(self.guidance_next)
+        self.guidance_card.layout().addLayout(notice_navigation)
         cards.addWidget(self.state_card, 0, 0)
         cards.addWidget(self.guidance_card, 0, 1)
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
-        main.addLayout(cards)
 
         self.transfer_strip = TransferStrip()
         self.progress = self.transfer_strip.progress
-        main.addWidget(self.transfer_strip)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.build_videos_page(), "Videos")
-        self.tabs.addTab(self.build_channel_page(), "Canal")
+        self.tabs.addTab(self.build_videos_page(), "En mi equipo")
+        self.tabs.addTab(self.build_channel_page(), "En YouTube")
         self.tabs.setTabIcon(0, app_icon("file-video-camera"))
         self.tabs.setTabIcon(1, app_icon("user-round"))
         self.tabs.currentChanged.connect(self.tab_changed)
@@ -1070,32 +1098,66 @@ class MainWindow(QMainWindow):
         self.guidance_target.setToolTip(notice.target)
         self.guidance_target.setText(self.guidance_target.fontMetrics().elidedText(
             Path(notice.target).name if notice.target else "", Qt.ElideMiddle, max(80, self.guidance_card.width() - 28)))
-        self.guidance_card.title.setText(f"AHORA / {sources.index(self.guidance_selected) + 1} DE {len(sources)}" if len(sources) > 1 else "AHORA")
+        self.guidance_card.title.setText(f"AVISOS / {sources.index(self.guidance_selected) + 1} DE {len(sources)}" if len(sources) > 1 else "AVISOS")
         self.guidance_card.setProperty("level", notice.level)
         self.guidance_card.style().unpolish(self.guidance_card)
         self.guidance_card.style().polish(self.guidance_card)
-        icons = {"connect": "key-round", "settings": "settings", "youtube_settings": "settings",
-                 "folder_settings": "folder-open", "refresh": "refresh-cw", "retry_video": "rotate-ccw",
-                 "console": "terminal", "videos": "layers", "channel": "user-round", "quota": "monitor",
-                 "enable_api": "external-link", "open_video": "play", "review_video": "circle-question-mark",
-                 "open_local": "folder-open", "delete_local": "trash", "manual_verify": "circle-check",
-                 "check_video": "refresh-cw", "studio": "external-link", "channel_limits": "circle-exclamation-point",
-                 "quota_request": "external-link", "copy_detail": "copy", "upload_file": "arrow-up", "cancel_upload": "square"}
-        for index, button in enumerate(self.guidance_buttons):
-            button.setVisible(index < len(notice.actions))
-            if index < len(notice.actions):
-                label, action = notice.actions[index]
-                short_labels = {"Reintentar video": "Reintentar", "Revisar videos": "Revisar", "Conectar canal": "Conectar"}
-                button.setText(short_labels.get(label, label) if index == 0 else "")
-                button.setToolTip("Comprobar con API" if action == "check_video" else label)
-                button.setAccessibleName(label)
-                button.setIcon(app_icon(icons.get(action, "circle-question-mark"),
-                                       "#5bd8b7" if action == "manual_verify" else "#ff6b7a" if action == "delete_local" else "#e5e7eb"))
-                button.setEnabled(not (action == "manual_verify" and self.manual_confirmation_running))
-        self.guidance_next.setVisible(len(sources) > 1)
         self.guidance_previous.setVisible(len(sources) > 1)
-        self.guidance_next.setToolTip(f"Siguiente aviso / {len(sources)} avisos")
+        self.guidance_next.setVisible(len(sources) > 1)
+        self.local_preview.actions_widget.setEnabled(not (self.local_delete_running or self.manual_confirmation_running))
         self.sync_status_hint()
+
+    def build_general_menu(self, menu) -> None:
+        menu.clear()
+        navigation = getattr(menu, "notice_navigation", None)
+        if navigation is None:
+            navigation = QMenu(t("Avisos"), menu)
+            menu.notice_navigation = navigation
+        navigation.clear()
+        navigation.setTitle(t("Avisos"))
+        menu.addMenu(navigation)
+        navigation.setIcon(app_icon("circle-exclamation-point"))
+        for source in self.guidance_order:
+            notice = self.guidance_notices[source]
+            label = notice.title + (" / " + Path(notice.target).name if notice.target else "")
+            item = navigation.addAction(label.replace("&", "&&"))
+            item.setCheckable(True)
+            item.setChecked(source == self.guidance_selected)
+            item.setData(source)
+            item.triggered.connect(lambda _checked=False, source=source: self.select_guidance(source))
+        menu.addSeparator()
+        commands = (("Conectar canal", "connect", "key-round"),
+                    ("Activar API", "enable_api", "external-link"),
+                    ("Ver cuota", "quota", "monitor"),
+                    ("Solicitar ampliación", "quota_request", "external-link"),
+                    ("Límites del canal", "channel_limits", "circle-exclamation-point"),
+                    ("YouTube Studio", "studio", "external-link"),
+                    ("Revisar videos", "videos", "layers"),
+                    ("Consola", "console", "terminal"))
+        for label, action, icon in commands:
+            command = menu.addAction(app_icon(icon), label)
+            notice = Guidance("", "", actions=((label, action),))
+            command.triggered.connect(lambda _checked=False, notice=notice: self.run_guidance_action(0, notice))
+        if not self.active_guidance.target:
+            notice = replace(self.active_guidance, actions=(("Copiar detalle", "copy_detail"),))
+            command = menu.addAction(app_icon("copy"), "Copiar detalle")
+            command.triggered.connect(lambda _checked=False, notice=notice: self.run_guidance_action(0, notice))
+
+    def select_guidance(self, source: str) -> None:
+        if source in self.guidance_notices:
+            self.tabs.setCurrentIndex(0)
+            self.guidance_selected = source
+            self.guidance_browsing = True
+            self.render_guidance()
+
+    def run_local_preview_action(self, action: str, path: str) -> None:
+        if action not in self.local_preview.buttons:
+            return
+        item = next((item for item in self.video_rows.values() if item.get("path") == path), None)
+        if item is None:
+            return
+        notice = Guidance("", "", actions=((action, action),), target=path, diagnostic=item.get("error", ""))
+        self.run_guidance_action(0, notice)
 
     def sync_status_hint(self) -> None:
         levels = {notice.level for notice in self.guidance_notices.values()}
@@ -1122,7 +1184,14 @@ class MainWindow(QMainWindow):
         display = Path(self.transfer_filename).name if self.transfer_filename else (
             f"{self.transfer_candidates} en cola" if self.transfer_candidates else "")
         self.transfer_strip.show_state(phase, display, self.transfer_percent)
+        self.update_upload_controls()
         self.layout_timer.start(0)
+
+    def update_upload_controls(self):
+        if hasattr(self, "cancel_btn"):
+            phase = self.transfer_strip.phase
+            active = bool(self.worker and self.worker.active_path)
+            self.cancel_btn.setEnabled(phase != "canceling" and (active or phase in {"queued", "uploading", "paused"}))
 
     def refresh_transfer_state(self, cycle_finished: bool = False) -> None:
         phase = self.transfer_strip.phase
@@ -1160,8 +1229,8 @@ class MainWindow(QMainWindow):
                 return True
         return False
 
-    def run_guidance_action(self, index: int) -> None:
-        notice = self.active_guidance
+    def run_guidance_action(self, index: int, notice: Guidance | None = None) -> None:
+        notice = notice or self.active_guidance
         if index >= len(notice.actions):
             return
         action = notice.actions[index][1]
@@ -1196,9 +1265,13 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(1)
         elif action == "channel_reload":
             self.refresh_channel()
-        elif action in {"videos", "retry_video", "open_video", "review_video", "open_local", "manual_verify", "check_video", "delete_local", "upload_file"}:
+        elif action in {"videos", "retry_video", "open_video", "review_video", "open_local", "manual_verify", "check_video", "delete_local", "upload_file", "locate_file"}:
+            if action != "videos" and not notice.target:
+                return
             found = self.focus_video(notice.target)
-            if action == "upload_file" and found:
+            if action == "videos" and found:
+                self.local_preview_visibility.toggle(True)
+            elif action == "upload_file" and found:
                 self.upload_selected_video()
             elif action == "manual_verify" and found:
                 self.confirm_video_manually()
@@ -1210,6 +1283,8 @@ class MainWindow(QMainWindow):
                 self.review_selected_video()
             elif action == "open_local" and found:
                 self.open_selected_local_video()
+            elif action == "locate_file" and found:
+                self.reveal_selected_local_file()
             elif action == "retry_video" and found:
                 self.retry_selected_video()
             elif action == "open_video" and found:
@@ -1243,20 +1318,21 @@ class MainWindow(QMainWindow):
     def build_videos_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        layout.addWidget(self.video_context)
+        layout.addWidget(self.transfer_strip)
         toolbar = QHBoxLayout()
-        title = QLabel("Biblioteca de videos")
+        title = QLabel("Archivos y subidas")
         title.setObjectName("PageTitle")
         toolbar.addWidget(title)
         toolbar.addStretch(1)
-        upload_one = self.action_button("Subir", app_icon("arrow-up"), primary=True)
-        upload_one.clicked.connect(self.upload_selected_video)
-        open_local = self.icon_button("Abrir local", QStyle.SP_DirOpenIcon)
-        open_local.clicked.connect(self.open_selected_local_video)
-        retry = self.icon_button("Reintentar", app_icon("rotate-ccw", "#56b6ff"))
-        retry.clicked.connect(self.retry_selected_video)
-        delete_local = self.icon_button("Borrar archivo local", QStyle.SP_TrashIcon, danger=True)
-        delete_local.clicked.connect(lambda: self.delete_selected_local_video())
-        cleanup = self.action_button("Limpieza", app_icon("brush", "#5bd8b7"))
+        self.upload_btn = self.action_button("Subir pendientes", app_icon("arrow-up"), primary=True)
+        self.upload_btn.clicked.connect(self.upload_pending)
+        self.cancel_btn = self.icon_button("Cancelar subida actual", app_icon("square"), danger=True)
+        self.cancel_btn.clicked.connect(self.cancel_upload)
+        self.cancel_btn.setEnabled(False)
+        self.open_folder_button = self.icon_button("Abrir carpeta configurada", QStyle.SP_DirOpenIcon, tone="info")
+        self.open_folder_button.clicked.connect(self.open_watch_folder)
+        cleanup = self.action_button("Limpieza", app_icon("brush"), tone="warning")
         cleanup_menu = QMenu(cleanup)
         configured_cleanup = cleanup_menu.addAction(app_icon("calendar"), "Según tiempo de conservación")
         configured_cleanup.triggered.connect(self.run_configured_cleanup)
@@ -1265,19 +1341,35 @@ class MainWindow(QMainWindow):
         cleanup.setMenu(cleanup_menu)
         cleanup.setToolTip("Opciones de limpieza local")
         self.short_cleanup_scanning = False
-        reload_btn = self.icon_button("Actualizar carpeta", app_icon("refresh-cw", "#56b6ff"))
-        reload_btn.clicked.connect(self.refresh_folder)
-        toolbar.addWidget(upload_one)
-        toolbar.addWidget(open_local)
-        toolbar.addWidget(retry)
-        toolbar.addWidget(delete_local)
+        self.refresh_btn = QToolButton()
+        self.refresh_btn.setIcon(app_icon("refresh-cw"))
+        self.refresh_btn.setIconSize(QSize(20, 20))
+        self.refresh_btn.setToolTip("Actualizar carpeta")
+        self.refresh_btn.setAccessibleName("Actualizar carpeta")
+        button_tone(self.refresh_btn, "info")
+        self.refresh_btn.setPopupMode(QToolButton.MenuButtonPopup)
+        self.refresh_btn.clicked.connect(self.refresh_folder)
+        refresh_menu = QMenu(self.refresh_btn)
+        self.remote_refresh_action = refresh_menu.addAction(app_icon("globe"), "Comprobar con YouTube")
+        self.remote_refresh_action.triggered.connect(self.request_remote_refresh)
+        self.refresh_btn.setMenu(refresh_menu)
+        toolbar.addWidget(self.upload_btn)
+        toolbar.addWidget(self.cancel_btn)
+        toolbar.addSpacing(8)
+        toolbar.addWidget(self.open_folder_button)
+        toolbar.addWidget(self.refresh_btn)
+        toolbar.addSpacing(8)
         toolbar.addWidget(cleanup)
-        toolbar.addWidget(reload_btn)
+        self.local_preview_button = self.icon_button("Mostrar vista previa", app_icon("arrow-left"))
+        self.local_preview_button.setFixedSize(42, 40)
         layout.addLayout(toolbar)
         self.video_summary = QLabel("Sin revisar")
         self.video_summary.setObjectName("Muted")
         self.video_summary.setWordWrap(True)
-        layout.addWidget(self.video_summary)
+        summary_row = QHBoxLayout()
+        summary_row.addWidget(self.video_summary, 1)
+        summary_row.addWidget(self.local_preview_button)
+        layout.addLayout(summary_row)
         self.video_table = QTableWidget(0, len(LIBRARY_COLUMNS))
         self.video_table.setProperty("translatedColumns", [4, 6, 7, 8, 9])
         self.video_table.itemSelectionChanged.connect(self.user_video_selection_changed)
@@ -1297,7 +1389,42 @@ class MainWindow(QMainWindow):
         self.video_table.horizontalHeader().sortIndicatorChanged.connect(lambda: self.local_media_timer.start(80))
         self.video_table.viewport().installEventFilter(self)
         self.configure_library_columns()
-        layout.addWidget(self.video_table, 1)
+        self.local_splitter = QSplitter(Qt.Horizontal)
+        self.local_splitter.setChildrenCollapsible(False)
+        self.local_splitter.addWidget(self.video_table)
+        self.local_preview = LocalPreview()
+        self.local_preview.action_requested.connect(self.run_local_preview_action)
+        self.reveal_file_button = self.local_preview.buttons["locate_file"]
+        self.reveal_file_button.setEnabled(False)
+        self.local_preview_scroll = QScrollArea()
+        self.local_preview_scroll.setObjectName("PreviewScroll")
+        self.local_preview_scroll.viewport().setObjectName("PreviewViewport")
+        self.local_preview_scroll.setFrameShape(QFrame.NoFrame)
+        self.local_preview_scroll.setWidgetResizable(True)
+        self.local_preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.local_preview_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.local_preview_scroll.setMinimumWidth(310)
+        self.local_preview_scroll.setWidget(self.local_preview)
+        self.local_preview_host = QFrame()
+        self.local_preview_host.setObjectName("PreviewPanel")
+        self.local_preview_host.setMinimumWidth(360)
+        preview_layout = QVBoxLayout(self.local_preview_host)
+        preview_layout.setContentsMargins(1, 8, 1, 1)
+        preview_layout.setSpacing(0)
+        preview_layout.addWidget(self.local_preview_scroll, 1)
+        local_tools = QFrame()
+        local_tools.setObjectName("PreviewFooter")
+        local_tools_layout = QVBoxLayout(local_tools)
+        local_tools_layout.setContentsMargins(14, 10, 14, 14)
+        local_tools_layout.addWidget(self.local_preview.actions_widget)
+        preview_layout.addWidget(local_tools)
+        self.local_splitter.addWidget(self.local_preview_host)
+        self.local_splitter.setStretchFactor(0, 3)
+        self.local_splitter.setStretchFactor(1, 2)
+        self.local_splitter.setSizes([820, 390])
+        self.local_preview_visibility = PreviewVisibility(self.local_splitter, self.local_preview_host,
+                                                        self.local_preview_button, self.local_preview.release, [820, 390])
+        layout.addWidget(self.local_splitter, 1)
         return page
 
     def configure_library_columns(self) -> None:
@@ -1319,6 +1446,7 @@ class MainWindow(QMainWindow):
             self.video_table.setColumnWidth(7, 112)
         self.video_table.setIconSize(QSize(96, 54) if "thumbnail" in visible else QSize(18, 18))
         self.video_table.verticalHeader().setDefaultSectionSize(64 if "thumbnail" in visible else 34)
+        self.video_table.setStyleSheet(table_selection_style(self.config.library_selection_color))
 
     def load_visible_local_media(self) -> None:
         if self._closing or not self.video_table.isVisible() or not MEDIA_COLUMNS.intersection(self.config.library_columns):
@@ -1344,12 +1472,22 @@ class MainWindow(QMainWindow):
                 self.apply_local_media(path, signature, data)
 
     def apply_local_media(self, path: str, signature: str, data: dict) -> None:
-        if self._closing or not MEDIA_COLUMNS.intersection(self.config.library_columns):
+        if self._closing:
             return
         try:
             if engine.file_signature(Path(path)) != signature:
                 return
         except OSError:
+            return
+        if self.local_preview.identity == (path, signature):
+            self.local_preview.set_media(data)
+            if data.get("thumbnail"):
+                self.local_preview.player.set_thumbnail(data["thumbnail"])
+            elif not data.get("thumbnail_checked"):
+                cached = self.local_media.request(path, signature, True)
+                if cached and cached.get("thumbnail"):
+                    self.local_preview.player.set_thumbnail(cached["thumbnail"])
+        if not MEDIA_COLUMNS.intersection(self.config.library_columns):
             return
         thumbnail = "thumbnail" in self.config.library_columns
         for row in range(self.video_table.rowCount()):
@@ -1372,42 +1510,44 @@ class MainWindow(QMainWindow):
     def build_channel_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        layout.setSpacing(10)
+        self.channel_overview = ChannelOverview()
+        self.channel_overview.set_identity(self.config.connected_channel_name, self.config.connected_channel_id)
+        layout.addWidget(self.channel_overview)
         toolbar = QVBoxLayout()
         header = QHBoxLayout()
-        title = QLabel("Canal de YouTube")
-        title.setObjectName("PageTitle")
-        header.addWidget(title)
-        header.addStretch(1)
         self.channel_loader_bar = QProgressBar()
         self.channel_loader_bar.setRange(0, 0)
+        self.channel_loader_bar.setMaximumHeight(4)
         self.channel_loader_bar.hide()
         header.addWidget(self.channel_loader_bar)
         toolbar.addLayout(header)
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        reload_btn = self.action_button("Cargar canal", QStyle.SP_BrowserReload)
+        reload_btn = self.action_button("Cargar canal", QStyle.SP_BrowserReload, tone="info")
         reload_btn.clicked.connect(self.refresh_channel)
-        youtube_btn = self.action_button("YouTube", QStyle.SP_ComputerIcon, primary=True)
+        youtube_btn = self.action_button("YouTube", QStyle.SP_ComputerIcon, tone="info")
         youtube_btn.setToolTip("Abrir YouTube")
         youtube_btn.clicked.connect(lambda: webbrowser.open("https://www.youtube.com"))
-        open_btn = self.action_button("Abrir", QStyle.SP_DialogOpenButton)
-        open_btn.clicked.connect(self.open_selected_channel_video)
-        share_btn = self.action_button("Compartir", QStyle.SP_FileLinkIcon)
-        share_btn.clicked.connect(self.share_selected_channel_video)
-        privacy_btn = self.action_button("Privacidad", QStyle.SP_DialogYesButton)
+        privacy_btn = self.icon_button("Privacidad", QStyle.SP_DialogYesButton, tone="warning")
         privacy_btn.clicked.connect(self.change_selected_channel_privacy)
-        duplicates_btn = self.action_button("Duplicados", QStyle.SP_FileDialogListView)
+        self.channel_batch_playlist_button = self.icon_button("Cambiar lista de seleccionados", app_icon("list-video"), tone="info")
+        self.channel_batch_playlist_button.clicked.connect(self.change_selected_channel_playlist)
+        self.channel_batch_playlist_button.setEnabled(False)
+        duplicates_btn = self.icon_button("Duplicados", QStyle.SP_FileDialogListView, tone="info")
         duplicates_btn.clicked.connect(self.find_channel_duplicates)
         delete_btn = self.action_button("Borrar", QStyle.SP_TrashIcon, danger=True)
         delete_btn.clicked.connect(self.delete_selected_channel_videos)
         for button in (reload_btn, youtube_btn):
             actions.addWidget(button)
         actions.addSpacing(12)
-        for button in (open_btn, share_btn, privacy_btn, duplicates_btn):
+        for button in (privacy_btn, self.channel_batch_playlist_button, duplicates_btn):
             actions.addWidget(button)
         actions.addStretch(1)
         actions.addWidget(delete_btn)
+        self.channel_preview_button = self.icon_button("Mostrar vista previa", app_icon("arrow-left"))
+        self.channel_preview_button.setFixedSize(42, 40)
         toolbar.addLayout(actions)
         layout.addLayout(toolbar)
         filters = QHBoxLayout()
@@ -1434,30 +1574,24 @@ class MainWindow(QMainWindow):
         filters.addWidget(self.channel_playlist_filter, 1)
         filters.addWidget(self.channel_date_filter, 1)
         layout.addLayout(filters)
-        playlist_bar = QHBoxLayout()
-        playlist_bar.setSpacing(8)
-        self.channel_playlist_combo = QComboBox()
-        self.channel_playlist_combo.setProperty("translatedItemCount", 1)
-        self.channel_playlist_combo.addItems(["Ninguna"])
-        move_playlist = self.action_button("Mover a lista", QStyle.SP_ArrowRight)
-        move_playlist.clicked.connect(self.change_selected_channel_playlist)
-        playlist_bar.addWidget(QLabel("Lista destino"), 0)
-        playlist_bar.addWidget(self.channel_playlist_combo, 1)
-        playlist_bar.addWidget(move_playlist, 0)
-        layout.addLayout(playlist_bar)
         self.channel_summary = QLabel("Pulsa Cargar canal o abre esta pestana para consultar YouTube.")
         self.channel_summary.setObjectName("Muted")
-        layout.addWidget(self.channel_summary)
+        self.channel_summary.setWordWrap(True)
+        summary_row = QHBoxLayout()
+        summary_row.addWidget(self.channel_summary, 1)
+        summary_row.addWidget(self.channel_preview_button)
+        layout.addLayout(summary_row)
 
         content = QSplitter(Qt.Horizontal)
         content.setObjectName("ChannelSplitter")
         content.setChildrenCollapsible(False)
         content.setHandleWidth(10)
         self.channel_splitter = content
-        self.channel_table = QTableWidget(0, 7)
-        self.channel_table.setProperty("translatedColumns", [3])
-        self.channel_table.setHorizontalHeaderLabels(["Miniatura", "Titulo", "Duracion", "Privacidad", "Listas", "Publicado", "YouTube"])
-        self.channel_table.horizontalHeaderItem(2).setIcon(app_icon("clock"))
+        self.channel_table = QTableWidget(0, len(CHANNEL_COLUMNS))
+        self.channel_table.setProperty("translatedColumns", [3, 13])
+        self.channel_table.setHorizontalHeaderLabels([label for _, label, _ in CHANNEL_COLUMNS])
+        for index, (_, _, icon) in enumerate(CHANNEL_COLUMNS):
+            self.channel_table.horizontalHeaderItem(index).setIcon(app_icon(icon))
         self.setup_table(self.channel_table)
         self.configure_channel_table_columns()
         self.channel_table.setIconSize(self.channel_table.iconSize())
@@ -1466,66 +1600,84 @@ class MainWindow(QMainWindow):
         content.addWidget(self.channel_table)
 
         preview = QFrame()
-        preview.setObjectName("PreviewPanel")
+        preview.setObjectName("PreviewContent")
         preview.setMinimumWidth(0)
         self.channel_preview_panel = preview
         preview_layout = QVBoxLayout(preview)
-        preview_layout.setContentsMargins(16, 16, 16, 16)
+        preview_layout.setContentsMargins(14, 14, 14, 14)
         preview_layout.setSpacing(10)
         self.channel_preview_title = QLabel("Selecciona un video")
         self.channel_preview_title.setObjectName("CardValue")
         self.channel_preview_title.setWordWrap(True)
+        self.channel_preview_title.setMinimumWidth(0)
+        self.channel_preview_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.channel_preview_title.setTextFormat(Qt.PlainText)
         self.channel_preview_meta = QLabel("Aqui veras la miniatura, datos y acciones rapidas.")
         self.channel_preview_meta.setObjectName("Muted")
         self.channel_preview_meta.setWordWrap(True)
-        self.channel_preview_thumb = PreviewThumbnail()
+        self.channel_preview_meta.setMinimumWidth(0)
+        self.channel_preview_meta.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.channel_preview_meta.setTextFormat(Qt.PlainText)
+        self.channel_preview_meta.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.channel_playback = ChannelPlayback(PreviewThumbnail(), self.store.base, preview)
+        self.channel_playback.settings_requested.connect(self.open_playback_settings)
+        self.channel_playback.share_requested.connect(self.share_channel_video_at_position)
+        self.channel_playback.share_video_requested.connect(self.share_selected_channel_video)
+        self.channel_preview_thumb = self.channel_playback.thumbnail
         preview_layout.addWidget(self.channel_preview_title)
         preview_layout.addWidget(self.channel_preview_meta)
-        preview_layout.addWidget(self.channel_preview_thumb)
+        preview_layout.addWidget(self.channel_playback)
         info_grid = QGridLayout()
         info_grid.setSpacing(8)
         self.channel_info_grid = info_grid
-        self.channel_preview_duration = QLabel("Duracion\n-")
-        self.channel_preview_privacy = QLabel("Privacidad\n-")
-        self.channel_preview_date = QLabel("Publicado\n-")
-        self.channel_preview_playlist = QLabel("Lista\n-")
-        self.channel_info_pills = [
-            self.channel_preview_duration,
-            self.channel_preview_privacy,
-            self.channel_preview_date,
-            self.channel_preview_playlist,
-        ]
-        for label in (
-            self.channel_preview_duration,
-            self.channel_preview_privacy,
-            self.channel_preview_date,
-            self.channel_preview_playlist,
-        ):
-            label.setObjectName("InfoPill")
-            label.setWordWrap(True)
+        self.channel_info_pills = [PreviewInfoPill(title, icon) for title, icon in (
+            ("Duracion", "clock"), ("Privacidad", "lock"), ("Publicado", "calendar"), ("Lista", "list-video"))]
+        (self.channel_preview_duration, self.channel_preview_privacy,
+         self.channel_preview_date, self.channel_preview_playlist) = [pill.value for pill in self.channel_info_pills]
         self.layout_channel_info_pills(two_columns=True)
         preview_layout.addLayout(info_grid)
         preview_layout.addStretch(1)
-        player_actions = QHBoxLayout()
-        player_actions.setSpacing(8)
-        browser_btn = self.action_button("Reproducir", QStyle.SP_MediaPlay, primary=True)
-        browser_btn.setToolTip("Abrir el video seleccionado en el navegador")
-        browser_btn.clicked.connect(self.open_selected_channel_video)
-        player_actions.addStretch(1)
-        player_actions.addWidget(browser_btn)
-        preview_layout.addLayout(player_actions)
         preview_scroll = QScrollArea()
+        preview_scroll.setObjectName("PreviewScroll")
+        preview_scroll.viewport().setObjectName("PreviewViewport")
         preview_scroll.setWidgetResizable(True)
         preview_scroll.setFrameShape(QFrame.NoFrame)
         preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        preview_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         preview_scroll.setMinimumWidth(280)
         preview_scroll.setWidget(preview)
         self.channel_preview_scroll = preview_scroll
+        self.channel_playback.transport.start_requested.connect(
+            lambda: QTimer.singleShot(0, lambda: preview_scroll.ensureWidgetVisible(self.channel_playback.transport)))
         preview_scroll.viewport().installEventFilter(self)
-        content.addWidget(preview_scroll)
+        preview_host = QFrame()
+        preview_host.setObjectName("PreviewPanel")
+        self.channel_preview_host = preview_host
+        preview_host.setMinimumWidth(360)
+        preview_host_layout = QVBoxLayout(preview_host)
+        preview_host_layout.setContentsMargins(1, 8, 1, 1)
+        preview_host_layout.setSpacing(0)
+        preview_host_layout.addWidget(preview_scroll, 1)
+        playback_tools = QFrame()
+        playback_tools.setObjectName("PreviewFooter")
+        playback_tools_layout = QVBoxLayout(playback_tools)
+        playback_tools_layout.setContentsMargins(14, 10, 14, 14)
+        playback_tools_layout.addWidget(self.channel_playback.controls_widget)
+        self.channel_playlist_button = self.icon_button("Cambiar lista", app_icon("list-video"), tone="info")
+        self.channel_playlist_button.setFixedSize(42, 40)
+        self.channel_playlist_button.clicked.connect(self.change_selected_channel_playlist)
+        self.channel_playlist_button.setEnabled(False)
+        self.channel_playback.controls.addWidget(self.channel_playlist_button, 2, 0, Qt.AlignRight)
+        preview_host_layout.addWidget(playback_tools)
+        content.addWidget(preview_host)
         content.setStretchFactor(0, 3)
         content.setStretchFactor(1, 1)
         content.setSizes([860, 380])
+        self.channel_preview_visibility = PreviewVisibility(content, preview_host, self.channel_preview_button,
+                                                          self.channel_playback.stop, [860, 380])
+        self.channel_control_reveal_timer = QTimer(self)
+        self.channel_control_reveal_timer.setSingleShot(True)
+        self.channel_control_reveal_timer.timeout.connect(self.reveal_channel_controls)
         content.splitterMoved.connect(lambda _pos, _index: self.layout_timer.start(30))
         layout.addWidget(content, 1)
         return page
@@ -1542,16 +1694,26 @@ class MainWindow(QMainWindow):
         table.horizontalHeader().setResizeContentsPrecision(100)
 
     def configure_channel_table_columns(self) -> None:
+        visible = normalize_channel_columns(self.config.channel_columns)
+        keys = [key for key, _, _ in CHANNEL_COLUMNS]
         header = self.channel_table.horizontalHeader()
         header.setMinimumSectionSize(72)
         header.setStretchLastSection(False)
-        header.setSectionResizeMode(0, QHeaderView.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        for column in (2, 3, 4, 5):
-            header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(6, QHeaderView.Fixed)
-        self.channel_table.setColumnWidth(0, 128)
-        self.channel_table.setColumnHidden(6, True)
+        widths = {"thumbnail": 116, "duration": 96, "privacy": 100, "playlists": 80, "published": 104,
+                  "url": 180, "id": 130, "filename": 210, "size": 92, "resolution": 120,
+                  "fps": 76, "quality": 82, "processing": 115}
+        for position, key in enumerate(visible + [key for key in keys if key not in visible]):
+            logical = keys.index(key)
+            header.moveSection(header.visualIndex(logical), position)
+            self.channel_table.setColumnHidden(logical, key not in visible)
+            header.setSectionResizeMode(logical, QHeaderView.Interactive)
+            self.channel_table.setColumnWidth(logical, widths.get(key, 140))
+        stretch = next((key for key in ("title", "filename", "url", "id") if key in visible), visible[-1])
+        header.setSectionResizeMode(keys.index(stretch), QHeaderView.Stretch)
+        if "thumbnail" in visible and len(visible) > 1:
+            header.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.channel_table.setColumnWidth(0, 116)
+        self.channel_table.setStyleSheet(table_selection_style(self.config.channel_selection_color) + " QHeaderView::section { padding: 6px 4px; }")
 
     def build_tray(self) -> None:
         self.tray = QSystemTrayIcon(QIcon(str(asset_path("youtube-sync.ico"))), self)
@@ -1606,6 +1768,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
             return
         event.ignore()
+        self.local_preview.release()
         self.hide()
         self.tray.showMessage(APP_NAME, t("La app sigue funcionando en la bandeja."), QSystemTrayIcon.Information, 1800)
 
@@ -1632,6 +1795,8 @@ class MainWindow(QMainWindow):
 
     def stop_background_work(self) -> None:
         self._closing = True
+        self.local_preview.release()
+        self.channel_playback.stop()
         self.local_media.shutdown()
         self.local_media_timer.stop()
         if self.settings_dialog is not None:
@@ -1646,6 +1811,7 @@ class MainWindow(QMainWindow):
         for timer in (self.timer, self.verification_timer, self.quota_timer, self.channel_render_timer,
                       self.folder_refresh_timer, self.layout_timer):
             timer.stop()
+        self.channel_control_reveal_timer.stop()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -1680,8 +1846,14 @@ class MainWindow(QMainWindow):
             max(80, self.guidance_card.width() - 28)))
         if hasattr(self, "channel_preview_panel"):
             self.layout_channel_info_pills(two_columns=self.channel_preview_panel.width() >= 420)
-            width = max(1, self.channel_preview_panel.width() - 32)
-            self.channel_preview_thumb.setFixedHeight(self.channel_preview_thumb.heightForWidth(width))
+            width = max(1, self.channel_preview_panel.width() - 28)
+            self.channel_playback.resize_media(width)
+            if self.channel_preview_host.isVisible() and self.channel_playback.video_id:
+                self.channel_control_reveal_timer.start(0)
+
+    def reveal_channel_controls(self) -> None:
+        if not self._closing and self.channel_preview_host.isVisible() and self.channel_playback.video_id:
+            self.channel_preview_scroll.ensureWidgetVisible(self.channel_playback.transport, 8, 8)
 
     def layout_channel_info_pills(self, two_columns: bool) -> None:
         if not hasattr(self, "channel_info_grid"):
@@ -1689,6 +1861,8 @@ class MainWindow(QMainWindow):
         if getattr(self, "_pills_two_columns", None) == two_columns:
             return
         self._pills_two_columns = two_columns
+        self.channel_info_grid.setColumnStretch(0, 1)
+        self.channel_info_grid.setColumnStretch(1, 1 if two_columns else 0)
         for index, label in enumerate(self.channel_info_pills):
             self.channel_info_grid.removeWidget(label)
             if two_columns:
@@ -1771,6 +1945,15 @@ class MainWindow(QMainWindow):
         if self.settings_dialog is not None:
             self.settings_dialog.apply_connection(config)
         self.channel_videos = []
+        self.channel_profile = {}
+        self.channel_loaded = False
+        self.channel_unavailable_count = 0
+        self.channel_checked_at = ""
+        self.channel_cached = False
+        self.channel_overview.avatar.set_image()
+        self.channel_overview.set_identity(config.connected_channel_name, config.connected_channel_id)
+        self.refresh_channel_overview()
+        self.channel_playback.select_video("")
         self.channel_table.setRowCount(0)
         self.refresh_all(light=True)
         self.connection_value = "Canal confirmado"
@@ -1908,9 +2091,12 @@ class MainWindow(QMainWindow):
         self.video_table.setSortingEnabled(False)
         self.video_table.setRowCount(0)
         self.video_rows = {}
+        self.reveal_file_button.setEnabled(False)
         self.transfer_candidates = 0
         self.processing_files = []
         if not folder or not folder.exists():
+            self.local_preview.select(None)
+            self.local_preview_visibility.selection_changed(False)
             self.video_summary.setText("Configura una carpeta valida.")
             self.refresh_connection_card()
             self.video_table.setSortingEnabled(True)
@@ -2041,13 +2227,29 @@ class MainWindow(QMainWindow):
 
     def video_selection_changed(self) -> None:
         selected = self.video_table.selectionModel().selectedRows()
+        self.reveal_file_button.setEnabled(bool(selected))
         if not selected:
+            self.local_preview.select(None)
+            self.local_preview_visibility.selection_changed(False)
             self.set_guidance("selection", None)
             return
         item = self.selected_video_row()
         if not item:
+            self.local_preview.select(None)
+            self.local_preview_visibility.selection_changed(False)
             self.set_guidance("selection", None)
             return
+        row = selected[0].row()
+        self.local_preview_visibility.selection_changed(True)
+        size = self.video_table.item(row, 2)
+        created = self.video_table.item(row, 3)
+        changed = self.local_preview.identity != (item["path"], item.get("signature", ""))
+        self.local_preview.select(item, size.text() if size else "", created.text() if created else "")
+        self.local_preview.player.setEnabled(not self.local_delete_running)
+        if changed and item.get("signature"):
+            data = self.local_media.request(item["path"], item["signature"], True)
+            if data is not None:
+                self.apply_local_media(item["path"], item["signature"], data)
         if item["status"] == "Revisar":
             notice = Guidance("Revisar antes de subir", "Autoriza la subida o revisa el archivo local. No se subirá automáticamente.",
                               "warning", (("Revisar", "review_video"), ("Abrir local", "open_local"), ("Vincular YouTube", "manual_verify"), ("Borrar local", "delete_local")), item["path"])
@@ -2062,7 +2264,7 @@ class MainWindow(QMainWindow):
                                ("Comprobar con API", "check_video"), ("Borrar local", "delete_local")), item["path"])
         elif item["status"] == "Pendiente":
             notice = Guidance("Vídeo pendiente", "Todavía no hay una subida confirmada para este archivo.", "info",
-                              (("Subir", "upload_file"), ("Ver local", "open_local"), ("Vincular YouTube", "manual_verify"), ("Borrar local", "delete_local")), item["path"])
+                              (("Subir", "upload_file"), ("Ver local", "open_local"), ("Borrar local", "delete_local")), item["path"])
         elif item["status"] == "Subido":
             notice = Guidance("Subida confirmada", "La marca se conserva mientras el archivo no cambie.", "info",
                               (("Ver YouTube", "open_video"), ("Ver local", "open_local"), ("Comprobar", "check_video"), ("Borrar local", "delete_local")), item["path"])
@@ -2081,6 +2283,7 @@ class MainWindow(QMainWindow):
             if notice.actions and notice.actions[0][1] == "videos":
                 notice = replace(notice, actions=(("Reintentar video", "retry_video"), ("Consola", "console")))
         self.set_guidance("selection", replace(notice, diagnostic=item.get("error", ""), target=item["path"]))
+        self.local_preview.set_actions(item, notice.actions)
 
     def selected_video_row(self) -> dict | None:
         selected = self.video_table.selectionModel().selectedRows()
@@ -2157,6 +2360,27 @@ class MainWindow(QMainWindow):
             return
         os.startfile(str(path))
 
+    def open_watch_folder(self) -> None:
+        path = Path(self.config.watch_folder) if self.config.watch_folder else None
+        try:
+            if path is None or not path.is_dir():
+                raise OSError("La carpeta configurada no está disponible.")
+            os.startfile(str(path.resolve()))
+        except OSError as exc:
+            QMessageBox.warning(self, "Abrir carpeta configurada", engine.describe_error(exc))
+
+    def reveal_selected_local_file(self) -> None:
+        item = self.selected_video_row()
+        if not item:
+            return
+        path = Path(item["path"])
+        try:
+            if not path.is_file():
+                raise OSError("El archivo seleccionado ya no existe.")
+            subprocess.Popen(["explorer.exe", "/select,", str(path.resolve())])
+        except OSError as exc:
+            QMessageBox.warning(self, "Mostrar archivo en Windows", engine.describe_error(exc))
+
     def delete_selected_local_video(self, item: dict | None = None) -> None:
         if self.local_delete_running or self.manual_confirmation_running:
             return
@@ -2193,6 +2417,7 @@ class MainWindow(QMainWindow):
         dialog.setDefaultButton(cancel)
         dialog.exec()
         if verified is not None and dialog.clickedButton() is verified:
+            self.local_preview.release()
             threading.Thread(target=self._delete_local_verified_thread, args=([item],), daemon=True).start()
         elif dialog.clickedButton() is force:
             self.begin_local_deletion([item])
@@ -2220,6 +2445,7 @@ class MainWindow(QMainWindow):
         if self.worker:
             self.worker.pause_after_current()
         self.manual_confirmation_running = True
+        self.local_preview.release()
         self.auto_btn.setEnabled(False)
         self.upload_btn.setEnabled(False)
         dialog = ManualConfirmationDialog(item, self)
@@ -2318,6 +2544,7 @@ class MainWindow(QMainWindow):
         ) != QMessageBox.StandardButton.Yes:
             return
         items = [{"signature": row[0], "title": row[3], "path": row[4], "youtube_id": row[5] or ""} for row in rows]
+        self.local_preview.release()
         threading.Thread(target=self._delete_local_verified_thread, args=(items,), daemon=True).start()
 
     def run_short_video_cleanup(self) -> None:
@@ -2393,11 +2620,13 @@ class MainWindow(QMainWindow):
     def begin_local_deletion(self, items: list[dict], short_only: bool = False) -> None:
         if self.local_delete_running or self.manual_confirmation_running:
             return
+        self.local_preview.release()
         self.auto_enabled = False
         self.update_auto_button()
         if self.worker:
             self.worker.pause_after_current()
         self.local_delete_running = True
+        self.local_preview.player.setEnabled(False)
         self.auto_btn.setEnabled(False)
         self.upload_btn.setEnabled(False)
         self.short_cleanup_action.setEnabled(False)
@@ -2602,11 +2831,20 @@ class MainWindow(QMainWindow):
             webbrowser.open(quota_console_url(self.config.client_secret_path))
 
     def channel_cache_loaded(self, checked_at: str) -> None:
+        self.channel_checked_at = checked_at
+        self.channel_cached = True
+        self.refresh_channel_overview()
         stamp = engine.datetime.fromisoformat(checked_at).astimezone()
         self.channel_summary.setText(f"Copia local del canal / ultima consulta {stamp:%d/%m %H:%M} / sin verificacion en directo")
 
     def tab_changed(self, index: int) -> None:
-        if self.tabs.tabText(index) == "Canal" and self.channel_table.rowCount() == 0:
+        self.video_context.setVisible(index == 0)
+        if index != 0:
+            self.local_preview.release()
+        if index != 1:
+            self.channel_playback.stop()
+        self.layout_timer.start(0)
+        if index == 1 and not self.channel_loaded:
             self.refresh_channel()
 
     def refresh_channel(self) -> None:
@@ -2618,6 +2856,9 @@ class MainWindow(QMainWindow):
         self.channel_summary.setText("Cargando canal desde YouTube...")
         self.channel_loader_bar.show()
         self.channel_loader = ChannelLoader(self.store, self.config)
+        self.channel_playlist_button.setEnabled(False)
+        self.channel_batch_playlist_button.setEnabled(False)
+        self.channel_loader.profile_ready.connect(self.apply_channel_profile)
         self.channel_loader.finished.connect(self.apply_channel_rows)
         self.channel_loader.failed.connect(self.channel_failed)
         self.channel_loader.cached.connect(self.channel_cache_loaded)
@@ -2627,9 +2868,37 @@ class MainWindow(QMainWindow):
         self.set_guidance("channel", None)
         self.channel_loader_bar.hide()
         self.channel_loader = None
-        self.channel_videos = list(videos)
+        self.channel_videos, missing_ids = split_gallery_rows(videos)
+        count = self.channel_profile.get("unavailable_count", 0)
+        self.channel_unavailable_count = max(len(missing_ids), count if type(count) is int and count >= 0 else 0)
+        self.channel_loaded = True
+        self.channel_cached = False
+        self.channel_checked_at = engine.datetime.now().astimezone().isoformat()
+        self.refresh_channel_overview()
         self.set_channel_playlist_options(list(playlists or []))
         self.render_channel_rows(self.channel_videos)
+
+    def apply_channel_profile(self, profile: dict) -> None:
+        self.channel_profile = dict(profile)
+        self.channel_overview.set_identity(profile.get("title") or self.config.connected_channel_name,
+                                           profile.get("id") or self.config.connected_channel_id)
+        self.channel_overview.avatar.set_image()
+        if profile.get("id") and profile.get("thumbnail"):
+            key = "channel:" + profile["id"]
+            if key in self.thumbnail_cache:
+                self.channel_overview.avatar.set_image(self.thumbnail_cache[key])
+            else:
+                self.fetch_thumbnail({"id": key, "thumbnail": profile["thumbnail"]})
+
+    def refresh_channel_overview(self) -> None:
+        stamp = ""
+        if self.channel_checked_at:
+            try:
+                stamp = engine.datetime.fromisoformat(self.channel_checked_at).astimezone().strftime("%d/%m %H:%M")
+            except ValueError:
+                pass
+        self.channel_overview.set_videos(self.channel_videos if self.channel_loaded else None, stamp, self.channel_cached,
+                                         self.channel_unavailable_count)
 
     def set_channel_playlist_options(self, playlists: list[dict]) -> None:
         self.channel_playlists_by_label = {"Ninguna": ""}
@@ -2648,13 +2917,10 @@ class MainWindow(QMainWindow):
         self.channel_playlist_filter.clear()
         self.channel_playlist_filter.addItems(list(self.channel_filter_playlists_by_label.keys()))
         self.channel_playlist_filter.setCurrentText(current_filter if current_filter in self.channel_filter_playlists_by_label else "Todas")
-        current_target = self.channel_playlist_combo.currentText() if hasattr(self, "channel_playlist_combo") else "Ninguna"
-        self.channel_playlist_combo.clear()
-        self.channel_playlist_combo.addItems(list(self.channel_playlists_by_label.keys()))
-        self.channel_playlist_combo.setCurrentText(current_target if current_target in self.channel_playlists_by_label else "Ninguna")
 
     def render_channel_rows(self, videos: list[dict]) -> None:
         self.channel_render_timer.stop()
+        self.channel_playback.select_video("")
         self.channel_table.setSortingEnabled(False)
         self.channel_table.setRowCount(0)
         self.channel_rows_by_id = {}
@@ -2675,7 +2941,7 @@ class MainWindow(QMainWindow):
         for video in batch:
             row = self.channel_table.rowCount()
             self.channel_table.insertRow(row)
-            self.channel_table.setRowHeight(row, 74)
+            self.channel_table.setRowHeight(row, 74 if "thumbnail" in self.config.channel_columns else 40)
             memberships = video.get("memberships", [])
             playlists = ", ".join(item.get("playlist_title", "") for item in memberships if item.get("playlist_title")) or "Sin lista"
             values = [
@@ -2686,21 +2952,30 @@ class MainWindow(QMainWindow):
                 playlists,
                 video.get("published_at", "")[:10],
                 f"https://youtu.be/{video.get('id', '')}",
+                video.get("id", ""), video.get("filename") or "-",
+                engine.human_size(video.get("size", 0)) if video.get("size") else "-",
+                video.get("resolution") or "-", str(video.get("fps") or "-"),
+                video.get("quality") or "-", {"processed": "Listo", "processing": "Procesando", "uploading": "Subiendo", "failed": "Error"}.get(video.get("processing"), video.get("processing") or "-"),
             ]
-            thumb = self.thumbnail_label(video, fetch_now=row < 80)
-            self.channel_table.setCellWidget(row, 0, thumb)
+            if "thumbnail" in self.config.channel_columns:
+                thumb = self.thumbnail_label(video, fetch_now=row < 80)
+                self.channel_table.setCellWidget(row, 0, thumb)
             for column, value in enumerate(values):
                 color = ""
                 if column == 3:
                     color = {"public": "#22c55e", "unlisted": "#3ea6ff", "private": "#f59e0b"}.get(video.get("privacy", ""), "")
-                self.channel_table.setItem(row, column, table_item(value, color))
+                if column in (2, 9, 11):
+                    number = duration_sort_value(value) if column == 2 else float(video.get("size" if column == 9 else "fps") or 0)
+                    self.channel_table.setItem(row, column, NumericTableItem(value, number))
+                else:
+                    self.channel_table.setItem(row, column, table_item(value, color))
             self.channel_rows_by_id[row] = video
         rendered = self.channel_table.rowCount()
         self.channel_summary.setText(f"Pintando canal... {rendered} de {self.channel_render_total}")
         if self.channel_render_pending:
             return
         self.channel_render_timer.stop()
-        self.channel_table.setColumnHidden(6, True)
+        self.configure_channel_table_columns()
         self.channel_table.setSortingEnabled(True)
         self.channel_summary.setText(f"{self.channel_render_total} videos cargados del canal.")
         self.update_channel_preview()
@@ -2747,7 +3022,9 @@ class MainWindow(QMainWindow):
             try:
                 request = urllib.request.Request(url, headers={"User-Agent": APP_NAME})
                 with urllib.request.urlopen(request, timeout=12) as response:
-                    data = response.read()
+                    data = response.read(8 * 1024 * 1024 + 1)
+                    if len(data) > 8 * 1024 * 1024:
+                        data = b""
             except Exception:
                 data = b""
             if not self._closing:
@@ -2760,6 +3037,10 @@ class MainWindow(QMainWindow):
                 label.setText("Sin imagen")
             return
         self.thumbnail_cache[video_id] = bytes(data)
+        if video_id.startswith("channel:"):
+            if video_id == "channel:" + self.channel_profile.get("id", ""):
+                self.channel_overview.avatar.set_image(bytes(data))
+            return
         for label in self.thumbnail_labels.get(video_id, []):
             self.set_thumbnail_pixmap(label, self.thumbnail_cache[video_id], 128, 72)
         selected = self.current_channel_video()
@@ -2799,27 +3080,29 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "channel_preview_title"):
             return
         video = self.current_channel_video()
+        self.channel_preview_visibility.selection_changed(video is not None)
+        self.channel_playlist_button.setEnabled(not self.channel_playlist_running and self.channel_loader is None and video is not None and len(self.channel_table.selectionModel().selectedRows()) == 1)
+        self.channel_batch_playlist_button.setEnabled(not self.channel_playlist_running and self.channel_loader is None and video is not None)
+        self.channel_playback.select_video(video.get("id", "") if video else "", video.get("privacy", "") if video else "")
         if not video:
             self.channel_preview_title.setText("Selecciona un video")
             self.channel_preview_meta.setText("Miniatura, datos y acciones rapidas.")
             self.channel_preview_thumb.clear_image("Sin miniatura")
-            self.channel_preview_duration.setText("Duracion\n-")
-            self.channel_preview_privacy.setText("Privacidad\n-")
-            self.channel_preview_date.setText("Publicado\n-")
-            self.channel_preview_playlist.setText("Lista\n-")
+            for pill in self.channel_info_pills:
+                pill.value.setText("-")
             return
         memberships = video.get("memberships", [])
-        playlists = ", ".join(item.get("playlist_title", "") for item in memberships if item.get("playlist_title")) or "Sin lista"
+        playlists = ", ".join(item.get("playlist_title", "") for item in memberships if item.get("playlist_title")) or t("Sin lista")
         privacy_labels = {"private": "Privado", "unlisted": "Oculto", "public": "Publico"}
         self.channel_preview_title.setRawText(video.get("title") or t("Sin titulo"))
         video_id = video.get("id", "")
         privacy_text = privacy_labels.get(video.get("privacy", ""), video.get("privacy", "-") or "-")
         published = video.get("published_at", "")[:10] or "Sin fecha"
         self.channel_preview_meta.setText(f"https://youtu.be/{video_id}")
-        self.channel_preview_duration.setText(f"Duracion\n{video.get('duration', '-')}")
-        self.channel_preview_privacy.setText(f"Privacidad\n{privacy_text}")
-        self.channel_preview_date.setText(f"Publicado\n{published}")
-        self.channel_preview_playlist.setRawText(t("Lista") + "\n" + playlists)
+        self.channel_preview_duration.setText(video.get("duration") or "-")
+        self.channel_preview_privacy.setText(t(privacy_text))
+        self.channel_preview_date.setText(t(published))
+        self.channel_preview_playlist.setText(playlists)
         if video_id in self.thumbnail_cache:
             self.repaint_channel_preview_thumbnail()
         else:
@@ -2827,6 +3110,7 @@ class MainWindow(QMainWindow):
             self.fetch_thumbnail(video)
 
     def filter_channel_table(self) -> None:
+        self.refresh_channel_overview()
         query = self.channel_search.text().strip().casefold() if hasattr(self, "channel_search") else ""
         privacy_label = self.channel_privacy_filter.currentText() if hasattr(self, "channel_privacy_filter") else "Todas"
         privacy = {"Publico": "public", "Oculto": "unlisted", "Privado": "private"}.get(privacy_label)
@@ -2868,31 +3152,61 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, APP_NAME, "Selecciona primero uno o varios videos del canal.")
         return videos
 
-    def open_selected_channel_video(self) -> None:
-        videos = self.selected_channel_videos()
-        if videos:
-            webbrowser.open(f"https://youtu.be/{videos[0]['id']}")
-
     def share_selected_channel_video(self) -> None:
         videos = self.selected_channel_videos()
         if not videos:
             return
-        video = videos[0]
-        if QMessageBox.question(
-            self, "Compartir video",
-            f"Se pondra como Oculto y se copiara el enlace:\n\n{video.get('title', '')}"
-        ) != QMessageBox.StandardButton.Yes:
-            return
-        self.channel_summary.setText("Preparando enlace compartido...")
-        threading.Thread(target=self._share_channel_video_thread, args=(video,), daemon=True).start()
+        seconds = None
+        if self.channel_playback.can_share_position() and self.channel_playback.video_id == videos[0].get("id"):
+            seconds = int(self.channel_playback.transport.last_data["position"])
+        self.prepare_channel_share(videos[0], seconds)
 
-    def _share_channel_video_thread(self, video: dict) -> None:
+    def share_channel_video_at_position(self, video_id: str, seconds: int) -> None:
+        if type(seconds) is not int or not 0 <= seconds <= 31 * 86400:
+            return
+        video = next((item for item in self.channel_videos if item.get("id") == video_id), None)
+        if video:
+            self.prepare_channel_share(video, seconds)
+
+    def prepare_channel_share(self, video: dict, seconds: int | None = None) -> None:
+        if self.channel_playback.share_busy:
+            return
+        dialog = self.share_confirmation(video, seconds)
+        answer = dialog.exec()
+        include_time = seconds is not None and dialog.checkBox().isChecked()
+        dialog.deleteLater()
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if not include_time:
+            seconds = None
+        self.channel_playback.set_share_busy(True)
+        self.channel_summary.setText("Preparando enlace compartido...")
+        threading.Thread(target=self._share_channel_video_thread, args=(dict(video), seconds), daemon=True).start()
+
+    def share_confirmation(self, video, seconds=None):
+        message = f"Se pondra como Oculto y se copiara el enlace:\n\n{video.get('title', '')}"
+        parent = self.channel_playback.popup or self
+        dialog = QMessageBox(parent)
+        dialog.setWindowTitle("Compartir video")
+        dialog.setText(message)
+        dialog.setTextFormat(Qt.PlainText)
+        dialog.setIcon(QMessageBox.Question)
+        dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        dialog.setDefaultButton(QMessageBox.StandardButton.No)
+        if seconds is not None:
+            checkbox = QCheckBox(t("Iniciar en {time}".format(time=media_time(seconds * 1000))), dialog)
+            dialog.start_checkbox = checkbox
+            checkbox.setChecked(False)
+            dialog.setCheckBox(checkbox)
+        return dialog
+
+    def _share_channel_video_thread(self, video: dict, seconds: int | None = None) -> None:
         try:
             client = engine.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
             client.set_video_unlisted(video["id"])
-            self.events.put(("channel_shared", video))
+            self.events.put(("channel_shared", {"video": video, "seconds": seconds}))
         except Exception as exc:
-            self.events.put(("channel_error", f"No se pudo compartir el video: {engine.describe_error(exc)}"))
+            self.events.put(("channel_share_error", f"No se pudo compartir el video: {engine.describe_error(exc)}"))
 
     def change_selected_channel_privacy(self) -> None:
         videos = self.selected_channel_videos()
@@ -2950,30 +3264,60 @@ class MainWindow(QMainWindow):
             self.events.put(("channel_error", f"No se pudo borrar del canal: {engine.describe_error(exc)}"))
 
     def change_selected_channel_playlist(self) -> None:
+        if self.channel_playlist_running or self.channel_loader is not None:
+            return
         videos = self.selected_channel_videos()
         if not videos:
             return
-        if len(videos) > 1:
-            QMessageBox.information(self, APP_NAME, "Selecciona un solo video para moverlo de lista.")
+        videos = list({video["id"]: dict(video, memberships=[dict(item) for item in video.get("memberships", [])])
+                       for video in videos}.values())
+        choices = {}
+        for name, playlist_id in self.channel_playlists_by_label.items():
+            label = name if playlist_id else t("Ninguna")
+            if label in choices:
+                label += " / " + playlist_id[-6:]
+            choices[label] = playlist_id
+        label, ok = QInputDialog.getItem(self, "Cambiar lista", "Lista de reproducción",
+                                         list(choices), 0, False, translate_items=False)
+        if not ok:
             return
-        label = self.channel_playlist_combo.currentText()
-        target_id = self.channel_playlists_by_label.get(label, "")
-        video = videos[0]
+        target_id = choices.get(label, "")
+        titles = "\n".join(video.get("title", video["id"]) for video in videos[:8])
         if QMessageBox.question(
             self,
             "Cambiar lista",
-            f"Mover este video a '{label}'?\n\n{video.get('title', '')}",
+            t("Mover {count} vídeo(s) a '{playlist}'?").format(count=len(videos), playlist=label)
+            + "\n\n" + t("Se quitarán de sus otras listas de reproducción.") + "\n\n" + titles,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         ) != QMessageBox.StandardButton.Yes:
             return
-        threading.Thread(target=self._change_channel_playlist_thread, args=(video, target_id), daemon=True).start()
+        self.channel_playlist_running = True
+        self.channel_playlist_button.setEnabled(False)
+        self.channel_batch_playlist_button.setEnabled(False)
+        self.channel_summary.setText(t("Cambiando lista de {count} vídeo(s)...").format(count=len(videos)))
+        threading.Thread(target=self._change_channel_playlist_thread, args=(videos, target_id), daemon=True).start()
 
-    def _change_channel_playlist_thread(self, video: dict, target_id: str) -> None:
+    def _change_channel_playlist_thread(self, videos: list[dict], target_id: str) -> None:
+        updated, errors = [], []
+        attempted = 0
         try:
             client = engine.YouTubeClient(self.store, self.config, lambda text: self.events.put(("log", text)))
-            client.replace_video_playlist(video["id"], video.get("memberships", []), target_id)
-            self.events.put(("channel_playlist_changed", "Lista actualizada correctamente."))
+            for video in videos:
+                if self._closing:
+                    break
+                attempted += 1
+                try:
+                    client.replace_video_playlist(video["id"], video.get("memberships", []), target_id)
+                    updated.append(video["id"])
+                except Exception as exc:
+                    errors.append(f"{video.get('title', video['id'])}: {engine.describe_error(exc)}")
+                    if engine.is_youtube_quota_error(exc):
+                        break
         except Exception as exc:
-            self.events.put(("channel_error", f"No se pudo cambiar la lista: {engine.describe_error(exc)}"))
+            errors.append(engine.describe_error(exc))
+        self.events.put(("channel_playlist_changed", {"updated": updated, "errors": errors,
+                                                     "skipped": len(videos) - attempted}))
 
     def channel_duplicate_key(self, video: dict) -> tuple | None:
         title = " ".join(str(video.get("title", "")).split()).casefold()
@@ -3017,6 +3361,7 @@ class MainWindow(QMainWindow):
     def channel_failed(self, message: str) -> None:
         self.channel_loader_bar.hide()
         self.channel_loader = None
+        self.update_channel_preview()
         self.channel_summary.setText(f"No se pudo cargar el canal: {message}")
         self.report_problem(message, "channel")
         if engine.is_youtube_quota_error(message):
@@ -3041,6 +3386,12 @@ class MainWindow(QMainWindow):
         dialog.install_ready.connect(self.install_update)
         dialog.show()
 
+    def open_playback_settings(self) -> None:
+        self.open_settings()
+        dialog = self.settings_dialog
+        dialog.settings_search.clear()
+        dialog.settings_tabs.setCurrentWidget(dialog.playback_settings_page)
+
     def install_update(self, plan) -> None:
         if self.local_delete_running or self.manual_confirmation_running or (self.worker and self.worker.active_path):
             QMessageBox.warning(self, "Actualizar YouTubeSync", "Finaliza o cancela la operación activa antes de instalar la actualización.")
@@ -3058,8 +3409,14 @@ class MainWindow(QMainWindow):
 
     def apply_saved_settings(self) -> None:
         updated = self.store.load_config()
-        display_only = replace(updated, library_columns=self.config.library_columns, language=self.config.language) == self.config
+        thumbnail_changed = ("thumbnail" in updated.channel_columns) != ("thumbnail" in self.config.channel_columns)
+        display_only = replace(updated, library_columns=self.config.library_columns, language=self.config.language,
+                               channel_columns=self.config.channel_columns, channel_selection_color=self.config.channel_selection_color,
+                               library_selection_color=self.config.library_selection_color) == self.config
         self.refresh_all(light=display_only)
+        self.configure_channel_table_columns()
+        if thumbnail_changed and self.channel_loaded:
+            self.filter_channel_table()
 
     def open_console(self) -> None:
         if self.diagnostic_window is None:
@@ -3157,12 +3514,38 @@ class MainWindow(QMainWindow):
                 self.set_guidance("activity", None)
                 self.report_problem(value, "connection")
             elif kind == "channel_shared":
+                self.channel_playback.set_share_busy(False)
                 self.set_guidance("channel", None)
-                value["privacy"] = "unlisted"
-                url = f"https://youtu.be/{value['id']}"
+                video, seconds = value["video"], value["seconds"]
+                for item in self.channel_videos:
+                    if item.get("id") == video["id"]:
+                        item["privacy"] = "unlisted"
+                url = f"https://youtu.be/{video['id']}"
+                if seconds is not None:
+                    url += f"?t={seconds}"
                 QApplication.clipboard().setText(url)
-                self.filter_channel_table()
-                self.channel_summary.setText("Video en Oculto / enlace copiado")
+                if self.channel_privacy_filter.currentText() not in {"Todas", "Oculto"}:
+                    self.filter_channel_table()
+                else:
+                    for row in range(self.channel_table.rowCount()):
+                        link = self.channel_table.item(row, 6)
+                        if link and link.text() == f"https://youtu.be/{video['id']}":
+                            with QSignalBlocker(self.channel_table):
+                                self.channel_table.setItem(row, 3, table_item("Oculto", "#3ea6ff"))
+                            break
+                    self.refresh_channel_overview()
+                    current = self.current_channel_video()
+                    if current and current.get("id") == video["id"]:
+                        self.channel_preview_privacy.setText(t("Oculto"))
+                message = "Video en Oculto / enlace copiado" if seconds is None else t(
+                    "Enlace copiado desde {time} / vídeo en Oculto".format(time=media_time(seconds * 1000)))
+                self.channel_summary.setText(message)
+                self.channel_playback.show_status(message)
+            elif kind == "channel_share_error":
+                self.channel_playback.set_share_busy(False)
+                self.channel_summary.setText(value)
+                self.channel_playback.show_status(value)
+                self.report_problem(value, "channel")
             elif kind == "channel_privacy_changed":
                 updated = len(value.get("updated", []))
                 errors = value.get("errors", [])
@@ -3189,8 +3572,17 @@ class MainWindow(QMainWindow):
                 self.report_problem(value, "channel")
                 QMessageBox.warning(self, APP_NAME, value)
             elif kind == "channel_playlist_changed":
-                self.set_guidance("channel", None)
-                self.channel_summary.setText(value)
+                self.channel_playlist_running = False
+                self.update_channel_preview()
+                message = t("Listas: {updated} actualizado(s), {errors} error(es), {skipped} sin intentar.").format(
+                    updated=len(value["updated"]), errors=len(value["errors"]), skipped=value["skipped"])
+                self.channel_summary.setText(message)
+                self.log(message, source="Canal")
+                if value["errors"]:
+                    self.report_problem("\n".join(value["errors"]), "channel")
+                    QMessageBox.warning(self, "Cambiar lista", message + "\n\n" + "\n".join(value["errors"][:8]))
+                else:
+                    self.set_guidance("channel", None)
                 self.refresh_channel()
             elif kind in {"local_delete_result", "manual_local_delete_result"}:
                 if kind == "manual_local_delete_result":
@@ -3290,6 +3682,10 @@ def apply_style(app: QApplication) -> None:
             font-size: 15pt;
             font-weight: 800;
         }
+        #ChannelName { font-size: 18pt; font-weight: 750; background: transparent; }
+        #ChannelCount { font-size: 20pt; font-weight: 750; background: transparent; }
+        #ChannelMedia { background: #0b0b0c; border: none; }
+        #LocalPlayer { background: transparent; }
         #Muted, #CardDetail {
             background: transparent;
             color: #a7adb8;
@@ -3311,7 +3707,8 @@ def apply_style(app: QApplication) -> None:
             font-size: 14pt;
             font-weight: 700;
         }
-        #ProfileValue { color: #e3e7ed; font-weight: 600; }
+        #ProfileLeadValue { color: #f6f7f9; font-size: 14pt; font-weight: 700; }
+        #ProfileValue { color: #adb6c5; font-size: 9pt; font-weight: 400; }
         #ProfileField { background: transparent; border: none; }
         #TransferStrip { background: #191b20; border: 1px solid #303845; border-radius: 8px; }
         #TransferStrip[phase="paused"] { border-color: #8f712e; }
@@ -3319,9 +3716,6 @@ def apply_style(app: QApplication) -> None:
         #GuidanceCard[level="warning"] { border-color: #916a20; background: #211e17; }
         #GuidanceCard[level="error"] { border-color: #b54048; background: #25191b; }
         #GuidanceValue { font-size: 12pt; font-weight: 700; background: transparent; }
-        #GuidanceTool { padding: 6px; min-width: 26px; max-width: 38px; }
-        #GuidanceAction { padding: 6px 10px; }
-        #GuidanceTool:pressed, #GuidanceAction:pressed { padding-top: 7px; padding-bottom: 5px; }
         #SettingsSection {
             background: #191b20;
             border: 1px solid #2c3039;
@@ -3331,6 +3725,9 @@ def apply_style(app: QApplication) -> None:
             background: #18181b;
             border: 1px solid #2a2b31;
             border-radius: 12px;
+        }
+        #PreviewContent, #PreviewFooter, #PreviewScroll, #PreviewViewport, #PreviewControls {
+            background: transparent; border: none;
         }
         #PreviewThumb, #ThumbCell {
             background: #0b0b0c;
@@ -3363,7 +3760,7 @@ def apply_style(app: QApplication) -> None:
         QPushButton, QToolButton {
             background: #252930;
             border: 1px solid #363c46;
-            border-radius: 10px;
+            border-radius: 8px;
             padding: 8px 12px;
             font-weight: 600;
             min-height: 22px;
@@ -3386,6 +3783,13 @@ def apply_style(app: QApplication) -> None:
             padding-top: 9px;
             padding-bottom: 7px;
         }
+        QPushButton:checked, QToolButton:checked {
+            background: #3b202a;
+            border-color: #ff4266;
+        }
+        QToolButton[popupMode="1"] { padding-right: 24px; }
+        QToolButton[popupMode="1"]::menu-button { width: 18px; border-left: 1px solid #535965; }
+        QToolButton[popupMode="1"]::menu-arrow { width: 8px; height: 8px; }
         #HeaderTool {
             min-width: 38px;
             max-width: 38px;
@@ -3394,29 +3798,38 @@ def apply_style(app: QApplication) -> None:
             border-radius: 12px;
             padding: 0px;
         }
+        #HeaderTool::menu-indicator { image: none; width: 0px; height: 0px; }
         #AutoOn {
             background: #16a34a;
             border-color: #22c55e;
         }
-        #AutoOff, #PrimaryButton {
+        #AutoOff {
             background: #ff0033;
             border-color: #ff3157;
         }
+        #PrimaryButton { background: #203c30; border-color: #3d7557; color: #c6efda; }
         #PrimaryButton:hover {
-            background: #ff3157;
+            background: #294d3c;
         }
+        #PrimaryButton:pressed { background: #182e24; border-color: #c6efda; }
+        #AutoOff:pressed { background: #bd0028; border-color: #ff6b86; }
+        #AutoOn:hover { background: #19b253; border-color: #68e79a; }
+        #AutoOn:pressed { background: #107232; border-color: #68e79a; }
         #PrimaryButton:disabled {
             color: #757b87;
             background: #1c1d21;
             border-color: #282a30;
         }
         #DangerButton {
-            background: #991b1b;
-            border-color: #ef4444;
+            background: #49272d;
+            border-color: #8c4854;
+            color: #ffd5db;
         }
         #DangerButton:hover {
-            background: #b91c1c;
+            background: #60343c;
         }
+        #DangerButton:pressed { background: #371e24; border-color: #ffd5db; }
+        #DangerButton:disabled { background: #282023; border-color: #463139; color: #827078; }
         QTabWidget::pane {
             border: none;
             border-top: 1px solid #303540;
@@ -3509,6 +3922,7 @@ def apply_style(app: QApplication) -> None:
         """.replace("@CHEVRON@", asset_path("icons/chevron-down.svg").as_posix())
         .replace("@CHEVRON_UP@", asset_path("icons/chevron-up.svg").as_posix())
         .replace("@CHECK@", asset_path("icons/check.svg").as_posix())
+        + button_tone_styles()
     )
     install_button_help(app)
 
@@ -3616,6 +4030,10 @@ def main() -> None:
             thread.join(10)
             from types import SimpleNamespace
             from youtube_sync_browser_player import NativeBrowserPlayer
+            from youtube_sync_first_party_player import FirstPartyPlayer
+            bridge_check = FirstPartyPlayer(Path(temporary), "http://127.0.0.1:1111/self-test", "aB3_dE6-fG9")
+            bridge_check.release()
+            bridge_check.deleteLater()
             settings = SettingsDialog(SimpleNamespace(base=Path(temporary)), engine.Config())
             native_check = settings.playback_login.accessibleName() == t("Gestionar sesión de reproducción") and NativeBrowserPlayer is not None
             language_check = settings.windowTitle() == t("Ajustes") and settings.language_combo.count() == 2

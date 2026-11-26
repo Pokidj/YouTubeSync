@@ -7,6 +7,7 @@ commit `c1a02a04d4f3f7049d44567d62b8b06cff0b9103`.
 `LICENSE.txt` incluye la licencia ISC original y el aviso MIT de los iconos
 derivados de Feather. Se dibujan localmente, sin servicio remoto de iconos.
 Los colores de check y chevron se fijan para los controles nativos Qt.
+El icono `captions.svg` procede de `icons/captions.svg` del mismo repositorio.
 
 ## English
 
@@ -16,3 +17,4 @@ commit `c1a02a04d4f3f7049d44567d62b8b06cff0b9103`.
 The original ISC license and the MIT notice for Feather-derived icons are
 included in `LICENSE.txt`. Assets are rendered locally; no icon service is used.
 Check and chevron stroke colors are fixed for native Qt controls.
+`captions.svg` comes from `icons/captions.svg` in the same repository.

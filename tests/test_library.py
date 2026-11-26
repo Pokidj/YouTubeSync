@@ -161,7 +161,7 @@ class LibraryLayoutTests(unittest.TestCase):
             warning.assert_called_once()
             self.window.store.save_config.assert_not_called()
             dialog.settings_search.setText("miniatura")
-            self.assertEqual(dialog.findChild(QTabWidget).tabText(dialog.findChild(QTabWidget).currentIndex()), "Biblioteca")
+            self.assertEqual(dialog.findChild(QTabWidget).tabText(dialog.findChild(QTabWidget).currentIndex()), "En mi equipo")
         finally:
             dialog.close()
 

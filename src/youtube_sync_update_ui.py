@@ -82,7 +82,7 @@ class UpdatePanel(QWidget):
         self.notes_button.setIcon(app_icon("file-text"))
         self.notes_button.clicked.connect(self.show_notes)
         self.install_button = QPushButton("Instalar actualización")
-        self.install_button.setIcon(app_icon("download"))
+        self.install_button.setIcon(app_icon("circle-check"))
         self.install_button.setObjectName("PrimaryButton")
         self.install_button.clicked.connect(self.request_install)
         self.install_button.hide()

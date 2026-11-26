@@ -76,6 +76,87 @@ class TransferLayoutTests(unittest.TestCase):
         self.assertEqual({field.accessibleName() for field in self.window.profile_fields},
                          {"Canal", "Carpeta", "Lista", "Categoria", "Privacidad"})
 
+    def test_profile_uses_three_balanced_rows_with_a_stronger_first_row(self):
+        grid = self.window.profile_grid
+        for row, fields in enumerate(((self.window.state_card.value, self.window.profile_channel),
+                                      (self.window.profile_folder, self.window.profile_privacy),
+                                      (self.window.profile_category, self.window.profile_playlist))):
+            for column, field in enumerate(fields):
+                container = grid.itemAtPosition(row, column).widget()
+                self.assertTrue(container.isAncestorOf(field))
+        self.assertEqual(grid.columnStretch(0), grid.columnStretch(1))
+        self.assertEqual(self.window.profile_channel.objectName(), "ProfileLeadValue")
+        self.assertEqual(self.window.state_card.value.objectName(), "ProfileLeadValue")
+        self.assertEqual(self.window.profile_folder.objectName(), "ProfileValue")
+
+    def test_header_only_contains_auto_and_settings_and_tools_belong_to_local_page(self):
+        from PySide6.QtWidgets import QAbstractButton
+        self.assertEqual(set(self.window.header_actions.findChildren(QAbstractButton)),
+                         {self.window.auto_btn, self.window.general_options_button, self.window.settings_btn})
+        self.assertIs(self.window.header_actions.layout().itemAt(1).widget(), self.window.general_options_button)
+        self.assertFalse(hasattr(self.window, "channel_general_options_button"))
+        self.assertFalse(self.window.tabs.widget(0).isAncestorOf(self.window.general_options_button))
+        for button in (self.window.upload_btn, self.window.cancel_btn, self.window.refresh_btn):
+            self.assertTrue(self.window.tabs.widget(0).isAncestorOf(button))
+            self.assertFalse(self.window.header_actions.isAncestorOf(button))
+        self.assertIsNone(self.window.upload_btn.menu())
+        self.assertEqual(self.window.upload_btn.text(), "Subir pendientes")
+        self.assertEqual(len(self.window.refresh_btn.menu().actions()), 1)
+        self.assertEqual(self.window.refresh_btn.menu().actions()[0].text(), "Comprobar con YouTube")
+        self.assertTrue(self.window.local_preview_host.isAncestorOf(self.window.reveal_file_button))
+
+    def test_consolidated_buttons_keep_selected_and_bulk_uploads_and_refreshes_separate(self):
+        with patch.object(ui.engine, "Store", return_value=self.window.store), \
+                patch.object(ui.MainWindow, "build_tray"), patch.object(ui.MainWindow, "refresh_all"), \
+                patch.object(ui.MainWindow, "upload_selected_video") as selected, \
+                patch.object(ui.MainWindow, "upload_pending") as pending, \
+                patch.object(ui.MainWindow, "refresh_folder") as local, \
+                patch.object(ui.MainWindow, "request_remote_refresh") as remote:
+            window = ui.MainWindow()
+            try:
+                window.upload_btn.click()
+                selected.assert_not_called()
+                pending.assert_called_once()
+                window.refresh_btn.click()
+                local.assert_called_once()
+                remote.assert_not_called()
+                window.remote_refresh_action.trigger()
+                remote.assert_called_once()
+            finally:
+                window._allow_exit = True
+                window.close()
+                window.deleteLater()
+
+    def test_stop_is_available_for_a_queue_or_transfer_but_not_remote_processing(self):
+        self.window.worker = None
+        for phase in ("idle", "processing", "canceling", "queued", "uploading", "paused"):
+            with self.subTest(phase=phase):
+                self.window.set_transfer_state(phase, "clip.mp4", 15)
+                self.assertEqual(self.window.cancel_btn.isEnabled(), phase in {"queued", "uploading", "paused"})
+
+    def test_notice_heading_uses_avisos_and_keeps_its_position(self):
+        self.window.set_guidance("quota", ui.Guidance("Cuota", "En espera", "warning"))
+        self.assertEqual(self.window.guidance_card.title.text(), "AVISOS")
+        self.window.set_guidance("library", ui.Guidance("Revisar", "Un caso", "warning"))
+        self.window.next_guidance()
+        self.assertEqual(self.window.guidance_card.title.text(), "AVISOS / 2 DE 2")
+
+    def test_notices_remain_information_only_even_with_multiple_actions(self):
+        self.window.tabs.setCurrentIndex(0)
+        actions = (("Confirmar coincidencia", "manual_verify"), ("Ver YouTube", "open_video"),
+                   ("Ver local", "open_local"), ("Reintentar", "retry_video"), ("Consola", "console"))
+        self.window.set_guidance("quota", ui.Guidance("Cuota", "En espera", "warning"))
+        self.window.set_guidance("selection", ui.Guidance("Revisar", "Comprueba el candidato", "warning", actions))
+        self.window.next_guidance()
+        for width, height in ((940, 620), (1920, 1080), (940, 620)):
+            self.window.resize(width, height)
+            self.settle()
+            self.assertEqual(self.window.width(), width)
+            from PySide6.QtWidgets import QAbstractButton
+            self.assertEqual(set(self.window.guidance_card.findChildren(QAbstractButton)),
+                             {self.window.guidance_previous, self.window.guidance_next})
+            self.assertTrue(self.window.guidance_next.isVisible())
+
     def test_user_selection_opens_that_file_notice_without_later_refresh_jumps(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
             path = Path(temporary) / "clip.mp4"
@@ -93,10 +174,12 @@ class TransferLayoutTests(unittest.TestCase):
             self.assertEqual(self.window.active_guidance.target, str(path))
 
     def test_strip_is_initially_hidden_and_is_below_both_top_cards(self):
+        self.window.tabs.setCurrentIndex(0)
         self.assertTrue(self.window.transfer_strip.isHidden())
         self.window.set_transfer_state("uploading", "clip.mp4", 35)
         self.settle()
-        self.assertGreaterEqual(self.window.transfer_strip.y(), self.window.state_card.y() + self.window.state_card.height())
+        self.assertGreaterEqual(self.window.transfer_strip.mapTo(self.window.centralWidget(), self.window.transfer_strip.rect().topLeft()).y(),
+                                self.window.state_card.mapTo(self.window.centralWidget(), self.window.state_card.rect().bottomLeft()).y())
         self.assertEqual(self.window.transfer_strip.height(), 44)
         self.assertFalse(hasattr(self.window, "upload_card"))
 
@@ -202,6 +285,10 @@ class TransferLayoutTests(unittest.TestCase):
                 self.settle()
                 self.assertEqual(self.window.width(), width)
                 self.assertEqual(self.window.state_card.height(), self.window.guidance_card.height())
+                self.assertGreaterEqual(self.window.video_table.height(), 100)
+                for button in (self.window.upload_btn, self.window.cancel_btn, self.window.refresh_btn):
+                    corner = button.mapTo(self.window.tabs.widget(0), button.rect().bottomRight())
+                    self.assertTrue(self.window.tabs.widget(0).rect().contains(corner))
                 self.assertGreaterEqual(self.window.channel_table.height(), 100)
                 self.assertLessEqual(self.window.transfer_strip.x() + self.window.transfer_strip.width(), self.window.width())
                 for field in self.window.profile_fields:

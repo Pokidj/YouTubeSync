@@ -32,6 +32,10 @@ puede tener Auto activado. Los tests sustituyen el almacén y las operaciones re
 | `src/youtube_sync_update_ui.py` | Comprobación, descarga e instalación desde Ajustes. |
 | `src/youtube_sync_i18n*.py`, `youtube_sync_translations.py` | Idiomas de presentación, sin cambiar estados internos. |
 | `src/youtube_sync_manual*.py`, `youtube_sync_*player.py` | Comparación guiada y reproducción local/YouTube. |
+| `src/youtube_sync_channel_*.py` | Catálogo, identidad, columnas y vista de En YouTube. |
+| `src/youtube_sync_local_preview.py`, `youtube_sync_preview_*.py` | Lateral local, fichas compartidas y visibilidad de paneles. |
+| `src/youtube_sync_transport_ui.py`, `youtube_sync_player_controls.py` | Controles, disponibilidad y comandos de reproducción validados. |
+| `src/youtube_sync_browser_pipe.py`, `youtube_sync_first_party_player.py` | Comunicación privada con el navegador de reproducción. |
 | `assets` | Logo, iconos Lucide y avisos de licencia. |
 | `packaging` | Especificación PyInstaller, manifiesto y script del instalador. |
 | `build_hooks` | Datos auxiliares de SSL para el runtime. |
@@ -45,6 +49,11 @@ se publican. La distribución completa de trabajo queda en `dist/YouTubeSync`;
 `_internal` es imprescindible. No mezcles ejecutables de distintas compilaciones.
 
 ## Arquitectura y rendimiento
+
+Los editores de tablas de Biblioteca y Canal comparten `youtube_sync_table_settings.py`.
+El original del logo es `assets/youtube-sync-logo.svg`; `scripts/build_brand_assets.py`
+exporta PNG e ICO sin modificar la geometría. El script de compilación lo ejecuta
+antes de empaquetar. [Marca, elección y prompts](BRANDING.md).
 
 La interfaz importa su motor directamente. Red, huellas, miniaturas y análisis
 de medios se ejecutan fuera del hilo Qt. Los resultados llegan mediante señales
@@ -108,3 +117,48 @@ Guarda UTF-8, evita cambios ajenos y revisa el índice Git antes de publicar.
 Nunca añadas JSON OAuth, tokens, perfiles de navegador, bases de datos ni logs.
 Las versiones se gestionan con `APP_VERSION` en `src/youtube_sync_version.py`.
 Consulta [Publicar versiones](RELEASES.md).
+
+## Reproductor de Canal 1.1
+
+Las fichas e iconos de ambos laterales comparten `youtube_sync_preview_ui.py`.
+La visibilidad y el ancho se gestionan con `PreviewVisibility`, sin arrancar una
+reproducción al seleccionar. Los botones del archivo actúan sobre su identidad,
+no sobre un aviso que pueda cambiar. Pendiente no ofrece comprobación guiada.
+
+`TransportControls` permanece visible y distingue selección, carga y datos reales:
+Play solicita la carga, pero posición, volumen, saltos y compartir un instante
+requieren disponibilidad y telemetría válidas. Los subtítulos empiezan apagados.
+Ocultar/cambiar de panel detiene la reproducción; Escape devuelve la pantalla
+completa al panel sin una ventana intermedia. No dupliques el botón Play ni el
+proceso de vídeo para la pantalla completa.
+
+En local se comparte un `QMediaPlayer` y un `QAudioOutput` con la vista completa,
+cambiando solo `videoOutput`: no se reubican ventanas de vídeo nativas mientras
+reciben fotogramas. Al volver se restaura la salida original; al cerrar o borrar
+se libera la fuente. Las pruebas cubren fotogramas decodificados, posición, volumen,
+Escape y cierre. Los scrolls de las vistas reservan ancho para evitar oscilaciones
+entre el tamaño de imagen y la aparición de la barra.
+
+Los públicos y ocultos conservan el iframe oficial y su API de controles. Los
+privados usan la página `/embed/ID` como documento principal de Chrome/Edge,
+en el perfil exclusivo `playback-session`; no se copia el perfil habitual ni
+se leen cookies, contraseñas o tokens. El acceso sigue dependiendo de YouTube.
+
+La comunicación CDP usa dos handles de pipe heredados exclusivamente por el
+proceso Chrome/Edge de la app, sin servidor TCP de depuración. La lectura y escritura
+se hacen fuera del hilo Qt. No se habilitan orígenes arbitrarios, modo headless ni
+se desactiva aislamiento. El cliente selecciona solo el target de una URL con token
+aleatorio creada por la app y adjunta una sesión CDP a esa pestaña. Solo permite
+descubrir/adjuntar/desadjuntar targets y, en la sesión propia, navegar y ejecutar
+operaciones fijas del reproductor oficial. No utiliza APIs de cookies, almacenamiento,
+autenticación o cuerpos de red. Un proceso secundario que se une al perfil ya
+abierto no sustituye el canal privado del proceso principal.
+
+La ventana nativa se identifica por HWND, PID y una propiedad aleatoria de Windows
+antes de cambiar de título. La app nunca cierra todo Chrome. El título residual
+solo se recorta si `WM_NCHITTEST` confirma que es una barra de título; se convierte
+de píxeles físicos al escalado Qt. Las comprobaciones dan paso al bucle de interfaz.
+
+Referencias: [IFrame Player API](https://developers.google.com/youtube/iframe_api_reference),
+[Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/),
+[perfiles propios de Chrome](https://developer.chrome.com/blog/remote-debugging-port).

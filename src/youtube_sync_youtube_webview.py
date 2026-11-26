@@ -10,6 +10,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from youtube_sync_manual import youtube_video_id
 from youtube_sync_youtube_player import EVENT_PREFIX, PLAYER_ORIGIN
+from youtube_sync_player_controls import telemetry
 
 
 class PlayerIdentity(QWebEngineUrlRequestInterceptor):
@@ -21,15 +22,17 @@ class PlayerIdentity(QWebEngineUrlRequestInterceptor):
 
 
 class PlayerPage(QWebEnginePage):
-    event = Signal(str, str, int)
+    event = Signal(str, str, object)
 
     def javaScriptConsoleMessage(self, level, message, line, source):
         if not message.startswith(EVENT_PREFIX):
             return
         try:
             data = json.loads(message[len(EVENT_PREFIX):])
-            if (data.get("type") in {"ready", "state", "error", "autoplay"}
-                    and isinstance(data.get("value"), int)):
+            if data.get("type") == "progress":
+                self.event.emit(youtube_video_id(data["id"]), "progress", telemetry(data["value"]))
+            elif (data.get("type") in {"ready", "state", "error", "autoplay"}
+                    and type(data.get("value")) is int):
                 self.event.emit(youtube_video_id(data["id"]), data["type"], data["value"])
         except (ValueError, KeyError, TypeError):
             pass

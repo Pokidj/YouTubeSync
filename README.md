@@ -6,13 +6,13 @@ Sube tus vídeos a YouTube desde una carpeta de Windows. Mantén a la vista qué
 falta por subir, qué se está procesando y qué está confirmado, sin repetir los
 archivos que ya hayas subido.
 
-![YouTubeSync](assets/youtube-sync-logo.png)
+<img src="assets/youtube-sync-logo.svg" alt="YouTubeSync" width="112" height="112">
 
 ## Descargar e instalar
 
 **[Descargar YouTubeSync para Windows](https://github.com/Pokidj/YouTubeSync/releases/latest)**
 
-1. En la última publicación, descarga **YouTubeSync-1.0-windows-x64-setup.exe**.
+1. En la última publicación, descarga **YouTubeSync-1.1-windows-x64-setup.exe**.
 2. Ejecuta el instalador y sigue los pasos. Incluye el programa completo:
    no necesitas instalar Python ni descargar librerías aparte.
 3. Abre **YouTubeSync** desde el menú Inicio o el acceso directo que hayas elegido.
@@ -38,14 +38,18 @@ y la autorización se recuerdan. [Guía completa de conexión y uso](docs/GUIA_D
 
 ## Qué puedes hacer
 
-- **Biblioteca:** ordenar los vídeos, elegir columnas y ver sus estados, tamaño,
-  duración, resolución o miniatura local.
+- **En mi equipo:** gestionar archivos y subidas, elegir columnas y ver estados,
+  tamaño, duración, resolución o miniatura local; previsualizar sin salir de la app.
 - **Subidas:** automatizar, subir un archivo, cancelar, revisar incidencias y
   autorizar un reintento concreto.
 - **Confirmación:** conservar la memoria de archivos subidos y comparar un vídeo
   local con su candidato de YouTube cuando haga falta una revisión manual.
-- **Canal:** buscar, filtrar, abrir vídeos, compartir enlaces, cambiar privacidad,
-  gestionar listas y revisar posibles duplicados antes de decidir qué borrar.
+- **En YouTube:** consultar el canal y sus totales, buscar y filtrar vídeos,
+  reproducirlos, compartir desde un instante, cambiar privacidad o listas por lotes,
+  revisar posibles duplicados y confirmar el borrado remoto.
+- **Reproductores:** vistas laterales ocultables, controles bajo el vídeo,
+  pantalla completa y retorno con Escape. Los privados requieren una sesión
+  autorizada en Ajustes > Reproducción, independiente de OAuth.
 - **Limpieza:** borrar copias locales con comprobación previa, configurar su
   conservación o revisar los vídeos de menos de 30 segundos.
 - **Ajustes:** idioma español o inglés, inicio con Windows, bandeja, columnas,
@@ -64,6 +68,10 @@ o cancela antes cualquier subida u operación activa.
 
 Se conservan ajustes, autorización, sesión de reproducción y registro de subidas.
 No necesitas desinstalar antes ni volver a conectar tu canal.
+
+**Novedades de 1.1:** navegación más clara, nuevo logo, avisos sin acciones duplicadas,
+tablas configurables en ambas vistas y reproductores unificados.
+[Consultar todos los cambios](CHANGELOG.md#11---2026-11-26).
 
 ## Ayuda y datos
 

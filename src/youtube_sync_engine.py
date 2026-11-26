@@ -38,6 +38,8 @@ import time
 
 from dataclasses import asdict, dataclass, field
 from youtube_sync_library import DEFAULT_LIBRARY_COLUMNS, normalize_library_columns
+from youtube_sync_channel_columns import DEFAULT_CHANNEL_COLUMNS, normalize_channel_columns, selection_color
+from youtube_sync_channel_data import split_gallery_rows
 
 
 from datetime import datetime, timedelta, timezone
@@ -445,6 +447,9 @@ class Config:
     connected_channel_id: str = ""
     connected_channel_name: str = ""
     library_columns: list[str] = field(default_factory=lambda: list(DEFAULT_LIBRARY_COLUMNS))
+    channel_columns: list[str] = field(default_factory=lambda: list(DEFAULT_CHANNEL_COLUMNS))
+    channel_selection_color: str = "green"
+    library_selection_color: str = "green"
 
     @property
     def extension_set(self) -> set[str]:
@@ -775,6 +780,9 @@ class Store:
         if config.language not in {"es", "en"}:
             config.language = "es"
         config.library_columns = normalize_library_columns(config.library_columns)
+        config.channel_columns = normalize_channel_columns(config.channel_columns)
+        config.channel_selection_color = selection_color(config.channel_selection_color)
+        config.library_selection_color = selection_color(config.library_selection_color)
         config.scan_interval_seconds = max(2, min(86400, config.scan_interval_seconds))
         config.stable_wait_seconds = max(1, min(86400, config.stable_wait_seconds))
         config.auto_delete_after_hours = max(1, config.auto_delete_after_hours)
@@ -1224,6 +1232,7 @@ class YouTubeClient:
         self._index_requested_ids: set[str] | None = None
         self._index_identity: str | None = None
         self._channel_info: dict | None = None
+        self.gallery_unavailable_ids: list[str] = []
 
     def available(self) -> bool:
         return all([Request, Credentials, InstalledAppFlow, build, MediaFileUpload, AuthorizedHttp, httplib2])
@@ -1391,6 +1400,7 @@ class YouTubeClient:
             videos.append(
                 {
                     "id": video_id,
+                    "metadata_available": video_id in (self._known_video_metadata or {}),
                     "title": metadata.get("title", "") or "Sin titulo",
                     "duration": format_iso_duration(metadata.get("duration", "")),
                     "privacy": metadata.get("privacy", "") or "desconocido",
@@ -1400,11 +1410,18 @@ class YouTubeClient:
                     "size": metadata.get("size", 0),
                     "fingerprint": metadata.get("fingerprint", ""),
                     "raw_duration": metadata.get("duration", ""),
+                    "resolution": metadata.get("resolution", ""),
+                    "fps": metadata.get("fps", 0),
+                    "quality": metadata.get("quality", ""),
+                    "processing": metadata.get("processing", ""),
                     "memberships": memberships.get(video_id, []),
                 }
             )
+        videos, self.gallery_unavailable_ids = split_gallery_rows(videos)
         videos.sort(key=lambda item: item["published_at"], reverse=True)
-        self.store.save_service_cache(self.scope, "gallery", {"videos": videos, "playlists": playlists})
+        profile = dict(self._channel_info or {}, unavailable_count=len(self.gallery_unavailable_ids))
+        self.store.save_service_cache(self.scope, "gallery", {"videos": videos, "playlists": playlists,
+                                                               "channel": profile, "unavailable_ids": self.gallery_unavailable_ids})
         return videos, playlists
 
     def set_video_privacy(self, video_id: str, privacy_status: str) -> None:
@@ -1422,15 +1439,7 @@ class YouTubeClient:
 
     def replace_video_playlist(self, video_id: str, memberships: list[dict], target_playlist_id: str) -> None:
         service = self.service()
-        already_in_target = False
-        for membership in memberships:
-            playlist_id = membership.get("playlist_id", "")
-            item_id = membership.get("item_id", "")
-            if playlist_id == target_playlist_id:
-                already_in_target = True
-                continue
-            if item_id:
-                service.playlistItems().delete(id=item_id).execute()
+        already_in_target = any(membership.get("playlist_id") == target_playlist_id for membership in memberships)
         if target_playlist_id and not already_in_target:
             service.playlistItems().insert(
                 part="snippet",
@@ -1441,6 +1450,10 @@ class YouTubeClient:
                     }
                 },
             ).execute()
+        # Keep the original memberships if adding to the destination fails.
+        for membership in memberships:
+            if membership.get("playlist_id", "") != target_playlist_id and membership.get("item_id"):
+                service.playlistItems().delete(id=membership["item_id"]).execute()
 
     def delete_video(self, video_id: str) -> None:
         if not video_id:
@@ -1547,6 +1560,8 @@ class YouTubeClient:
                     if snippet.get("title") and video_id not in title_candidates.get(snippet["title"], []):
                         title_candidates.setdefault(snippet["title"], []).append(video_id)
                     file_details = item.get("fileDetails", {})
+                    streams = file_details.get("videoStreams") or []
+                    stream = streams[0] if streams and isinstance(streams[0], dict) else {}
                     description = snippet.get("description", "") or ""
                     marker = ""
                     for line in description.splitlines():
@@ -1571,6 +1586,10 @@ class YouTubeClient:
                         "privacy": item.get("status", {}).get("privacyStatus", ""),
                         "filename": Path(file_details.get("fileName", "") or "").name,
                         "size": remote_size,
+                        "resolution": f"{stream['widthPixels']} x {stream['heightPixels']}" if stream.get("widthPixels") and stream.get("heightPixels") else "",
+                        "fps": stream.get("frameRateFps", 0),
+                        "quality": item.get("contentDetails", {}).get("definition", "").upper(),
+                        "processing": state,
                         "fingerprint": marker,
                     }
         ready_ids = {video_id for video_id, state in video_states.items() if state == "processed"}

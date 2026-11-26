@@ -1,7 +1,116 @@
 """English UI catalog. Spanish source labels are the stable message identifiers."""
 
 ENGLISH = dict(line.split("|", 1) for line in """
+Reproducir a pantalla completa|Play full screen
+En mi equipo|On my computer
+En YouTube|On YouTube
+Conexión|Connection
+Archivos y subidas|Files and uploads
+Columnas de archivos|Local file columns
+Columnas de YouTube|YouTube columns
+Selecciona al menos una columna de archivos locales.|Select at least one local file column.
+Selecciona al menos una columna de YouTube.|Select at least one YouTube column.
+Compartir desde aquí|Share from here
+Subtítulos|Captions
+Columnas de Canal|Channel columns
+Color de selección|Selection color
+Verde|Green
+Azul|Blue
+Rojo|Red
+Violeta|Violet
+ID del vídeo|Video ID
+Archivo original|Original file
+Calidad|Quality
+Procesamiento|Processing
+Selecciona al menos una columna para Canal.|Select at least one channel column.
+Activa o desactiva los subtítulos disponibles para este vídeo.|Turn available captions on or off for this video.
+Elige la lista de reproducción del vídeo seleccionado y confirma el cambio.|Choose the selected video's playlist and confirm the change.
+Permite elegir si el enlace empieza en la posición actual; cambia el vídeo a Oculto tras confirmar.|Choose whether the link starts at the current position; set the video to Unlisted after confirmation.
+Restaurar columnas de Canal|Restore channel columns
+Restaurar columnas de esta tabla|Restore this table's columns
+Restaura las columnas de esta tabla sin cambiar los vídeos ni su color de selección.|Restore this table's columns without changing videos or its selection color.
+No hay ajustes que coincidan con la búsqueda.|No settings match your search.
+Restaura las columnas iniciales de Canal sin cambiar los datos de YouTube.|Restore the initial channel columns without changing YouTube data.
+Revisar acceso en Ajustes|Review access in Settings
+Abre el reproductor a pantalla completa con sus controles; reproducir en el panel no cambia de vista.|Open the player full screen with its controls; playing in the panel does not change the view.
+Abre Ajustes en Reproducción para revisar la cuenta y sus permisos de acceso al vídeo.|Open Settings on Playback to review the account and video access permissions.
+Posición del vídeo|Video position
+Ir a un punto del vídeo|Seek within the video
+Volumen del vídeo|Video volume
+Retroceder 10 segundos|Back 10 seconds
+Avanzar 10 segundos|Forward 10 seconds
+Reanudar vídeo|Resume video
+Pausar vídeo|Pause video
+Silenciar vídeo|Mute video
+Activar sonido del vídeo|Unmute video
+Sesión de reproducción|Playback session
+Inicia sesión en YouTube y vuelve a reproducir el vídeo.|Sign in to YouTube, then play the video again.
+Abriendo YouTube con la sesión de reproducción…|Opening YouTube using the playback session…
+Se necesita Chrome o Microsoft Edge para reproducir los privados con tu sesión.|Chrome or Microsoft Edge is required to play private videos using your session.
+Cierra las ventanas de la sesión de reproducción y vuelve a abrirla desde Ajustes > Reproducción. No cierres tu navegador habitual.|Close the playback-session windows and reopen the session from Settings > Playback. Do not close your usual browser.
+YouTube no permite reproducir este vídeo con esta sesión. Revisa la cuenta en Ajustes > Reproducción.|YouTube does not allow playback with this session. Check the account in Settings > Playback.
+YouTube no da acceso a este vídeo. Inicia sesión con una cuenta autorizada en Ajustes > Reproducción.|YouTube is not granting access to this video. Sign in with an authorized account in Settings > Playback.
+No se pudo abrir el vídeo en la sesión de YouTube.|Could not open the video in the YouTube session.
+No se pudo cargar YouTube. Comprueba la conexión y reintenta.|Could not load YouTube. Check the connection and retry.
+El reproductor ha salido del vídeo seleccionado. Vuelve a cargarlo.|The player has left the selected video. Load it again.
+Se ha cerrado la sesión del reproductor. Vuelve a cargar el vídeo.|The player session was closed. Load the video again.
+Windows no ha permitido identificar la ventana del reproductor.|Windows could not identify the player window.
+El reproductor aún no está disponible. Reintenta la carga del vídeo.|The player is not available yet. Try loading the video again.
+La configuración local del reproductor no es válida.|The local player configuration is invalid.
+Retrocede diez segundos dentro del vídeo que se está reproduciendo.|Go back ten seconds in the video currently playing.
+Avanza diez segundos dentro del vídeo que se está reproduciendo.|Go forward ten seconds in the video currently playing.
+Pausa el vídeo actual sin cerrar el reproductor ni perder su posición.|Pause the current video without closing the player or losing its position.
+Continúa la reproducción desde la posición actual del vídeo.|Resume playback from the video's current position.
+Silencia solo este vídeo; no cambia el volumen de Windows.|Mute this video only; Windows volume is unchanged.
+Recupera el sonido del vídeo con el volumen elegido.|Unmute the video at the selected volume.
+Abre la sesión de YouTubeSync para iniciar sesión con una cuenta autorizada a ver el vídeo privado.|Open the YouTubeSync session to sign in with an account authorized to watch the private video.
+Tu canal de YouTube|Your YouTube channel
+Canal vinculado|Linked channel
+Públicos|Public
+Privados|Private
+Ocultos|Unlisted
+Sin cargar|Not loaded
+Copia guardada|Saved snapshot
+Canal actualizado|Channel updated
+Reproductor / YouTubeSync|Player / YouTubeSync
+Abrir en YouTube|Open on YouTube
+Abrir reproductor en ventana|Open player in a separate window
+Volver al panel|Return to panel
+Detener reproducción|Stop playback
+Pantalla completa|Full screen
+Salir de pantalla completa|Exit full screen
+Reproduciendo en ventana|Playing in a separate window
+Reproduce el vídeo seleccionado dentro del panel del canal con la sesión de reproducción de YouTubeSync.|Play the selected video in the channel panel using the YouTubeSync playback session.
+Mueve el mismo reproductor a una ventana independiente que puedes ampliar a pantalla completa.|Move the same player to a separate window that can be made full screen.
+Devuelve el reproductor al panel del canal sin iniciar una segunda reproducción.|Return the player to the channel panel without starting a second playback.
+Detiene el vídeo y cierra su reproductor, sin dejar audio reproduciéndose en segundo plano.|Stop the video and close its player without leaving audio playing in the background.
+Abre la pantalla completa; Escape o salir devuelve el vídeo al panel sin abrir una ventana pequeña.|Open full screen; Escape or exit returns the video to the panel without opening a small window.
 Ahora|Now
+Avisos|Notices
+Opciones generales|General options
+Cambiar lista de seleccionados|Change selected videos' playlist
+Mover {count} vídeo(s) a '{playlist}'?|Move {count} video(s) to '{playlist}'?
+Se quitarán de sus otras listas de reproducción.|They will be removed from their other playlists.
+Cambiando lista de {count} vídeo(s)...|Changing playlist for {count} video(s)...
+Listas: {updated} actualizado(s), {errors} error(es), {skipped} sin intentar.|Playlists: {updated} updated, {errors} error(s), {skipped} not attempted.
+Comparar|Compare
+Abre los avisos y las opciones generales de conexión, cuota y diagnóstico; no realiza subidas ni borra archivos por sí solo.|Open notices and general connection, quota and diagnostic options; opening this menu does not upload or delete files.
+Localizar|Locate
+Mostrar panel|Show panel
+Ocultar panel|Hide panel
+Abrir carpeta configurada|Open configured folder
+Mostrar archivo en Windows|Reveal file in Windows
+La carpeta configurada no está disponible.|The configured folder is not available.
+Abre en el Explorador la carpeta elegida en Ajustes, aunque tengas otro archivo seleccionado.|Open the folder chosen in Settings in File Explorer, even if another file is selected.
+Abre el Explorador y resalta el archivo seleccionado en la tabla.|Open File Explorer and highlight the file selected in the table.
+Mostrar vista previa|Show preview
+Ocultar vista previa|Hide preview
+Muestra el vídeo seleccionado y sus controles en el panel lateral, sin iniciar la reproducción.|Show the selected video and its controls in the sidebar without starting playback.
+Oculta el panel lateral y detiene su reproducción, conservando la fila seleccionada.|Hide the sidebar and stop its playback while keeping the selected row.
+Abrir en el Explorador|Show in File Explorer
+Selecciona un archivo|Select a file
+Selecciona un archivo para previsualizarlo.|Select a file to preview it.
+Comprobar con YouTube|Check with YouTube
 Canal|Channel
 Canal y carpeta|Channel and folder
 Configuracion|Settings
@@ -631,6 +740,11 @@ ENGLISH.update({
 })
 
 TEMPLATES = [
+    ("Iniciar en {time}", "Start at {time}"),
+    ("Desde {time}", "From {time}"),
+    ("Enlace copiado desde {time} / vídeo en Oculto", "Link copied from {time} / video set to Unlisted"),
+    ("{count} referencias no disponibles (fuera del total)", "{count} unavailable references (excluded from the total)"),
+    ("{count} sin clasificar", "{count} unclassified"),
     ("No se pudo actualizar el inicio con Windows: {error}", "Could not update Windows startup: {error}"),
     ("Instalar la versión {version}?\n\nYouTubeSync se cerrará y volverá a abrirse al terminar. Tus ajustes, autorización y registro se conservarán.", "Install version {version}?\n\nYouTubeSync will close and reopen when finished. Your settings, authorization and records will be kept."),
     ("GitHub no pudo consultar la release (HTTP {code}).", "GitHub could not retrieve the release (HTTP {code})."),
@@ -666,6 +780,7 @@ TEMPLATES = [
     ("{context}: necesita revision", "{context}: review needed"),
     ("Siguiente aviso / {count} avisos", "Next notice / {count} notices"),
     ("AHORA / {index} DE {total}", "NOW / {index} OF {total}"),
+    ("AVISOS / {index} DE {total}", "NOTICES / {index} OF {total}"),
     ("{count} en cola", "{count} queued"),
     ("Total {total} / Pendientes {pending} / Revisar {review} / En curso {active} / En espera {waiting} / Por verificar {verify} / Subidos {uploaded} / Incidencias {issues}", "Total {total} / Pending {pending} / Review {review} / In progress {active} / Waiting {waiting} / Verification {verify} / Uploaded {uploaded} / Issues {issues}"),
     ("Subida manual solicitada para {file}.", "Manual upload requested for {file}."),
@@ -799,8 +914,8 @@ Abre la documentación de YouTube sobre el límite de subidas del canal.|Open Yo
 Inicia la comparación guiada entre el archivo local y su candidato de YouTube.|Start a guided comparison between the local file and its YouTube candidate.
 Consulta solo este ID y busca pruebas técnicas de correspondencia y procesamiento; usa cuota API.|Check only this ID for technical evidence of identity and processing; uses API quota.
 Muestra el archivo que necesita una decisión y sus opciones de revisión.|Show the file that needs a decision and its review options.
-Vuelve al aviso anterior de Ahora sin cambiar los estados de los vídeos.|Go to the previous Now notice without changing video states.
-Avanza al siguiente aviso de Ahora; conserva tu elección durante las recargas.|Go to the next Now notice; your selection is kept during refreshes.
+Vuelve al aviso anterior sin cambiar los estados de los vídeos.|Go to the previous notice without changing video states.
+Avanza al siguiente aviso; conserva tu elección durante las recargas.|Go to the next notice; your selection is kept during refreshes.
 Copia el detalle de este aviso ocultando las credenciales reconocibles.|Copy this notice's details with recognizable credentials redacted.
 Abre el diagnóstico con búsqueda, filtros y opciones para copiar o exportar los errores.|Open diagnostics with search, filters and options to copy or export errors.
 Copia el informe de diagnóstico con los secretos reconocibles ocultos.|Copy the diagnostic report with recognizable secrets redacted.
@@ -837,7 +952,9 @@ Abre la API de YouTube en Google Cloud para habilitarla en tu proyecto.|Open the
 Abre la configuración oficial de Google Cloud para preparar el acceso OAuth.|Open official Google Cloud settings to prepare OAuth access.
 Despliega el listado completo de archivos afectados por esta confirmación.|Show the complete list of files affected by this confirmation.
 Recoge el listado de archivos sin cambiar la decisión de borrado.|Collapse the file list without changing the deletion decision.
-Inicia o reanuda el archivo local dentro del asistente.|Start or resume local playback inside the wizard.
+Inicia o reanuda el archivo local en el reproductor integrado.|Start or resume the local file in the integrated player.
+Abre la ubicación del archivo seleccionado en Windows; sin selección, abre la carpeta configurada.|Open the selected file's location in Windows; without a selection, open the configured folder.
+La carpeta o el archivo ya no está disponible.|The folder or file is no longer available.
 Pausa la reproducción local y conserva su posición.|Pause local playback and keep its position.
 Activa o silencia el sonido del reproductor local.|Mute or unmute the local player.
 Abre el archivo en el reproductor de Windows si la vista integrada no puede reproducirlo.|Open the file in the Windows player if the embedded preview cannot play it.

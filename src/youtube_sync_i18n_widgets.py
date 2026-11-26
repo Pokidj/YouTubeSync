@@ -194,8 +194,8 @@ class QInputDialog:
         return W.QInputDialog.getText(parent, t(title), t(label), *args, **kwargs)
 
     @staticmethod
-    def getItem(parent, title, label, items, *args, **kwargs):
-        translated = [t(item) for item in items]
+    def getItem(parent, title, label, items, *args, translate_items=True, **kwargs):
+        translated = [t(item) for item in items] if translate_items else list(items)
         value, ok = W.QInputDialog.getItem(parent, t(title), t(label), translated, *args, **kwargs)
         return (items[translated.index(value)] if ok and value in translated else value), ok
 

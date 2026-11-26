@@ -5,13 +5,13 @@
 Upload videos to YouTube from a Windows folder. See what is pending, processing
 or confirmed without uploading unchanged confirmed files again.
 
-![YouTubeSync](assets/youtube-sync-logo.png)
+<img src="assets/youtube-sync-logo.svg" alt="YouTubeSync" width="112" height="112">
 
 ## Download and Install
 
 **[Download YouTubeSync for Windows](https://github.com/Pokidj/YouTubeSync/releases/latest)**
 
-1. Download **YouTubeSync-1.0-windows-x64-setup.exe** from the latest release.
+1. Download **YouTubeSync-1.1-windows-x64-setup.exe** from the latest release.
 2. Run the installer. It includes the complete application: no separate Python
    or library installation is needed.
 3. Open **YouTubeSync** from Start or your chosen desktop shortcut.
@@ -36,13 +36,17 @@ are remembered. [Complete setup and user guide](docs/USER_GUIDE.en.md).
 
 ## Features
 
-- **Library:** sort videos, customize columns and view state, size, duration,
-  resolution or local thumbnail.
+- **On my computer:** manage files/uploads, customize columns and view state,
+  size, duration, resolution or local thumbnails, with in-app previews.
 - **Uploads:** automate, upload one file, cancel, review problems and explicitly retry.
 - **Confirmation:** remember confirmed files and compare a local video with its
   YouTube candidate when manual review is needed.
-- **Channel:** search, filter, open, share, change visibility, manage playlists
-  and review possible duplicates before deciding what to delete.
+- **On YouTube:** view your channel and totals, search/filter/play videos,
+  share a playback position, change visibility/playlists in batches, review
+  potential duplicates and confirm remote deletion.
+- **Players:** hideable sidebars, controls beneath the video, full screen and
+  Escape to return. Private videos require an authorized Settings > Playback
+  session, separate from OAuth.
 - **Cleanup:** verify remote uploads before deleting local copies, configure
   retention or review videos under 30 seconds.
 - **Settings:** Spanish/English, Windows startup, system tray, columns, playback
@@ -60,6 +64,10 @@ closes, updates and reopens. Finish or cancel any active upload or operation fir
 
 Settings, authorization, playback session and upload records are kept. No prior
 uninstall or repeated channel authorization is required.
+
+**New in 1.1:** clearer navigation, a new logo, Notices without duplicate commands,
+configurable tables in both views and matching video players.
+[Read all changes](CHANGELOG.en.md#11---2026-11-26).
 
 ## Help and Data
 
